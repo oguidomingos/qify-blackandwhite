@@ -5,6 +5,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Remove any node_modules that might be tracked
+**/node_modules/
+
 # Next.js
 .next/
 out/
