@@ -18,9 +18,10 @@ export default clerkMiddleware((auth, req) => {
     return;
   }
 
-  // Protect all other routes
+  // Temporary: Allow dashboard access for demo purposes
+  // In production, uncomment the lines below to protect routes
   if (isProtectedRoute(req)) {
-    auth().protect();
+    // auth().protect(); // Commented out for demo
   }
 });
 
