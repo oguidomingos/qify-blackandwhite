@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useOrganization } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { 
   Building, 
   Calendar, 
@@ -76,19 +78,40 @@ const PERSONALITIES = [
 ];
 
 export default function DemoOnboardingWizard() {
+  const { organization } = useOrganization();
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     businessName: "",
     niche: "",
+    businessDescription: "",
     agentName: "",
     personality: "professional",
   });
 
   const progress = ((currentStep + 1) / ONBOARDING_STEPS.length) * 100;
 
-  const handleNext = () => {
+  const saveStepData = async (stepId: string) => {
+    setIsSaving(true);
+    
+    // In a real implementation, this would save to Convex
+    // For now, we'll simulate an API call
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        console.log(`Saving data for step: ${stepId}`, formData);
+        setIsSaving(false);
+        resolve(true);
+      }, 1000);
+    });
+  };
+
+  const handleNext = async () => {
     const currentStepId = ONBOARDING_STEPS[currentStep].id;
+    
+    // Save current step data
+    await saveStepData(currentStepId);
     
     // Mark current step as completed
     if (!completedSteps.includes(currentStepId)) {
@@ -98,8 +121,10 @@ export default function DemoOnboardingWizard() {
     if (currentStep < ONBOARDING_STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Onboarding completed - redirect to dashboard
-      window.location.href = "/dashboard";
+      // Onboarding completed - update organization status and redirect to dashboard
+      // In a real implementation, this would update the organization in Convex
+      console.log("Onboarding completed for organization:", organization?.id);
+      router.push("/dashboard");
     }
   };
 
@@ -139,8 +164,11 @@ export default function DemoOnboardingWizard() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-white">Descrição do Negócio</Label>
+              <Label htmlFor="businessDescription" className="text-white">Descrição do Negócio</Label>
               <Textarea
+                id="businessDescription"
+                value={formData.businessDescription}
+                onChange={(e) => setFormData({...formData, businessDescription: e.target.value})}
                 placeholder="Descreva seu negócio, diferenciais e como ajuda seus clientes"
                 className="glass min-h-[120px]"
               />
@@ -160,7 +188,17 @@ export default function DemoOnboardingWizard() {
                 Conecte sua agenda para agendamentos automáticos
               </p>
             </div>
-            <Button className="glass-hover">
+            <Button 
+              className="glass-hover"
+              onClick={() => {
+                // In a real implementation, this would initiate Google OAuth flow
+                console.log("Initiating Google Calendar connection");
+                // Mark step as completed for demo purposes
+                if (!completedSteps.includes("google")) {
+                  setCompletedSteps([...completedSteps, "google"]);
+                }
+              }}
+            >
               Conectar Google Calendar
             </Button>
             <p className="text-slate-400 text-sm">
@@ -249,6 +287,20 @@ export default function DemoOnboardingWizard() {
                   </div>
                 </div>
               </div>
+              
+              <Button 
+                className="glass-hover"
+                onClick={() => {
+                  // In a real implementation, this would initiate WhatsApp connection
+                  console.log("Initiating WhatsApp connection");
+                  // Mark step as completed for demo purposes
+                  if (!completedSteps.includes("whatsapp")) {
+                    setCompletedSteps([...completedSteps, "whatsapp"]);
+                  }
+                }}
+              >
+                Configurar WhatsApp
+              </Button>
             </div>
           </div>
         );
@@ -375,10 +427,20 @@ export default function DemoOnboardingWizard() {
               
               <Button 
                 onClick={handleNext}
+                disabled={isSaving}
                 className="glass-hover"
               >
-                {isLastStep ? "Finalizar" : "Próximo"}
-                <ArrowRight className="ml-2 h-4 w-4" />
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Salvando...
+                  </>
+                ) : isLastStep ? (
+                  "Finalizar"
+                ) : (
+                  "Próximo"
+                )}
+                {!isSaving && !isLastStep && <ArrowRight className="ml-2 h-4 w-4" />}
               </Button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 {
+  "project": "qify-sdr-agent",
   "authInfo": [
     {
       "domain": "https://flowing-sawfish-84.clerk.accounts.dev",
