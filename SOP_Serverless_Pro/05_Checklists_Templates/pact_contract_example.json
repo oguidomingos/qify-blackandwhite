@@ -1,0 +1,8 @@
+{
+  "consumer": {"name": "web-app"},
+  "provider": {"name": "api"},
+  "interactions": [
+    {"description": "health", "request": {"method": "GET", "path": "/health"}, "response": {"status": 200}}
+  ],
+  "metadata": {"pactSpecification": {"version": "2.0.0"}}
+}

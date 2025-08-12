@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 2%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 90%;
+    --primary-foreground: 0 0% 5%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 90%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 0 0% 90%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 0 0% 90%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .glass {
+    background: linear-gradient(145deg, hsla(0, 0%, 5%, 0.8), hsla(0, 0%, 5%, 0.4));
+    backdrop-filter: blur(8px);
+    border: 1px solid hsla(0, 0%, 15%, 0.3);
+    box-shadow: 0 8px 32px hsla(0, 0%, 0%, 0.6);
+  }
+  
+  .glass-hover {
+    transition: all 0.3s ease-in-out;
+  }
+  
+  .glass-hover:hover {
+    border-color: hsla(0, 0%, 90%, 0.5);
+    box-shadow: 0 0 40px hsla(0, 0%, 50%, 0.4);
+  }
+  
+  .voice-dots {
+    animation: voiceDots 1.4s ease-in-out infinite;
+  }
+  
+  .speaking-dots {
+    display: flex;
+    gap: 4px;
+  }
+  
+  .speaking-dots div {
+    width: 8px;
+    height: 8px;
+    background: hsl(0 0% 90%);
+    border-radius: 50%;
+    animation: speakingPulse 1.4s ease-in-out infinite;
+  }
+  
+  .speaking-dots div:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  
+  .speaking-dots div:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+}
+
+@keyframes voiceDots {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+@keyframes speakingPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
