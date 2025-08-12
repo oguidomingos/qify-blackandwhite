@@ -1,6 +1,0 @@
-type Query {
-  health: String!
-}
-type Mutation {
-  noop: Boolean!
-}
