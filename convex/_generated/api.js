@@ -1,44 +1,22 @@
-// Temporary API file until Convex is properly set up
-export const api = {
-  organizations: {
-    getByClerkId: null,
-    create: null,
-    updateOnboardingStep: null,
-  },
-  businessProfiles: {
-    getByOrg: null,
-    upsert: null,
-  },
-  agentConfigurations: {
-    getByOrg: null,
-    upsert: null,
-  },
-  evolutionInstances: {
-    getByOrg: null,
-    create: null,
-    getQRCode: null,
-    checkConnection: null,
-    startSync: null,
-  },
-  google: {
-    getCredentialsByOrg: null,
-    listCalendars: null,
-  },
-  organizationSettings: {
-    getByOrg: null,
-    upsert: null,
-  },
-};
+/* eslint-disable */
+/**
+ * Generated `api` utility.
+ *
+ * THIS CODE IS AUTOMATICALLY GENERATED.
+ *
+ * To regenerate, run `npx convex dev`.
+ * @module
+ */
 
-export const internal = {
-  evolutionInstances: {
-    createInDb: null,
-    updateQRCode: null,
-    updateConnection: null,
-    updateLastSync: null,
-    getById: null,
-  },
-  syncStatus: {
-    create: null,
-  },
-};
+import { anyApi } from "convex/server";
+
+/**
+ * A utility for referencing Convex functions in your app's API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
+export const api = anyApi;
+export const internal = anyApi;
