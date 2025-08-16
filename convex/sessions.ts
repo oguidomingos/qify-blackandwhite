@@ -51,8 +51,42 @@ export const listByOrg = query({
   handler: async (ctx: any, { orgId }: any) => {
     return await ctx.db
       .query("sessions")
-      .withIndex("by_org_last", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org_last", (q: any) => q.eq("orgId", orgId))
       .order("desc")
       .take(50);
+  },
+});
+
+export const getActiveByContact = query({
+  args: { contactId: v.id("contacts") },
+  handler: async (ctx: any, { contactId }: any) => {
+    return await ctx.db
+      .query("sessions")
+      .filter((q) => q.and(
+        q.eq(q.field("contactId"), contactId),
+        q.eq(q.field("status"), "active")
+      ))
+      .first();
+  },
+});
+
+export const create = mutation({
+  args: {
+    contactId: v.id("contacts"),
+    orgId: v.id("organizations"),
+    channel: v.string(),
+    status: v.string()
+  },
+  handler: async (ctx: any, args: any) => {
+    const now = Date.now();
+    return await ctx.db.insert("sessions", {
+      orgId: args.orgId,
+      contactId: args.contactId,
+      stage: "situation", // Default SPIN stage
+      status: args.status,
+      variables: {},
+      lastActivityAt: now,
+      createdAt: now
+    });
   },
 });
