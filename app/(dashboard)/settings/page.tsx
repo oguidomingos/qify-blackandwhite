@@ -20,7 +20,7 @@ const settingsCategories = [
     title: "WhatsApp",
     description: "Gerencie contas e configurações do WhatsApp",
     icon: MessageCircle,
-    href: "/settings/whatsapp",
+    href: "/dashboard/settings/whatsapp",
     status: "connected",
     items: ["Evolution API", "Webhook", "Números"],
   },
@@ -28,7 +28,7 @@ const settingsCategories = [
     title: "IA e Prompts",
     description: "Configure prompts e parâmetros da IA",
     icon: Bot,
-    href: "/settings/ai",
+    href: "/ai-settings",
     status: "active",
     items: ["Prompts SPIN", "Gemini 2.0", "Personalidade"],
   },
@@ -36,7 +36,7 @@ const settingsCategories = [
     title: "Organização",
     description: "Configurações da organização e integração Google",
     icon: Building,
-    href: "/settings/organization",
+    href: "/dashboard/settings/organization",
     status: "partial",
     items: ["Google Calendar", "Timezone", "Membros"],
   },
@@ -44,7 +44,7 @@ const settingsCategories = [
     title: "Membros e Papéis",
     description: "Gerencie membros da equipe e permissões",
     icon: Users,
-    href: "/settings/members",
+    href: "/dashboard/settings/members",
     status: "active",
     items: ["Convites", "Papéis", "Permissões"],
   },
@@ -52,7 +52,7 @@ const settingsCategories = [
     title: "Segurança",
     description: "Configurações de segurança e auditoria",
     icon: Shield,
-    href: "/settings/security",
+    href: "/dashboard/settings/security",
     status: "enabled",
     items: ["Logs de auditoria", "2FA", "API Keys"],
   },
@@ -75,22 +75,8 @@ const getStatusBadge = (status: string) => {
 
 export default function SettingsPage() {
   return (
-    <div className="flex-1 space-y-6 p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Configurações</h1>
-          <p className="text-muted-foreground">
-            Gerencie as configurações do seu agente SDR
-          </p>
-        </div>
-        <Button variant="outline" className="glass-hover">
-          <SettingsIcon className="mr-2 h-4 w-4" />
-          Configurações Avançadas
-        </Button>
-      </div>
+    <div className="space-y-6">
 
-      {/* Settings Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {settingsCategories.map((category) => {
           const Icon = category.icon;
@@ -131,43 +117,6 @@ export default function SettingsPage() {
             </Card>
           );
         })}
-      </div>
-
-      {/* Quick Stats */}
-      <div className="grid gap-6 md:grid-cols-3">
-        <Card className="glass">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Status do Sistema</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span className="text-sm text-foreground">Todos os serviços operacionais</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="glass">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Última Sincronização</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">
-              2 minutos atrás
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="glass">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Armazenamento</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">
-              2.1 GB / 10 GB utilizados
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

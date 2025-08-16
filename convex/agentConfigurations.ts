@@ -105,3 +105,34 @@ export const listAll = query({
     return await ctx.db.query("agent_configurations").collect();
   },
 });
+
+export const updateSettings = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    responseTime: v.optional(v.number()),
+    personality: v.optional(v.string()),
+    language: v.optional(v.string()),
+    toneOfVoice: v.optional(v.string()),
+  },
+  handler: async (ctx, { orgId, responseTime, personality, language, toneOfVoice }) => {
+    const config = await ctx.db
+      .query("agent_configurations")
+      .filter((q) => q.eq(q.field("orgId"), orgId))
+      .first();
+    
+    if (!config) {
+      throw new Error("Agent configuration not found");
+    }
+    
+    const updates: any = {
+      updatedAt: Date.now(),
+    };
+    
+    if (responseTime !== undefined) updates.responseTime = responseTime;
+    if (personality !== undefined) updates.personality = personality;
+    if (language !== undefined) updates.language = language;
+    if (toneOfVoice !== undefined) updates.toneOfVoice = toneOfVoice;
+    
+    return await ctx.db.patch(config._id, updates);
+  },
+});

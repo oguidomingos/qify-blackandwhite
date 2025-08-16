@@ -5,313 +5,229 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { 
-  Bot, 
-  Sparkles, 
-  MessageSquare, 
-  Clock, 
-  Languages,
-  Save
-} from "lucide-react";
-import { useState } from "react";
-
-const SPIN_STAGES = [
-  {
-    id: "situation",
-    name: "Situação",
-    description: "Entender o contexto e situação atual do prospect"
-  },
-  {
-    id: "problem",
-    name: "Problema",
-    description: "Identificar os desafios e dores do prospect"
-  },
-  {
-    id: "implication",
-    name: "Implicação",
-    description: "Explorar as consequências dos problemas"
-  },
-  {
-    id: "need",
-    name: "Necessidade",
-    description: "Apresentar soluções e valor proposto"
-  }
-];
-
-const PERSONALITIES = [
-  {
-    id: "professional",
-    name: "Profissional",
-    description: "Formal, direto e focado em resultados"
-  },
-  {
-    id: "friendly",
-    name: "Amigável",
-    description: "Caloroso, empático e conversacional"
-  },
-  {
-    id: "energetic",
-    name: "Energético",
-    description: "Entusiasmado, motivador e dinâmico"
-  },
-  {
-    id: "consultative",
-    name: "Consultivo",
-    description: "Analítico, questionador e orientado a soluções"
-  }
-];
+import { Bot, Save, Settings } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useConvex, useMutation, useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useOrganization } from "@clerk/nextjs";
+import { toast } from "sonner";
 
 export default function AISettings() {
-  const [selectedStage, setSelectedStage] = useState("situation");
-  const [selectedPersonality, setSelectedPersonality] = useState("professional");
+  const { organization } = useOrganization();
+  const [loading, setSaving] = useState(false);
   
-  // Mock prompts - in a real implementation, these would come from Convex
-  const [prompts, setPrompts] = useState({
-    situation: {
-      opening: "Olá! Estou entrando em contato para entender melhor sobre sua empresa. Poderia me contar um pouco sobre o que vocês fazem?",
-      followUp: [
-        "Como vocês começaram a trabalhar nessa área?",
-        "Quais são os principais desafios que vocês enfrentam atualmente?"
-      ],
-      closing: "Obrigado por compartilhar essas informações. Vou analisar e em breve volto com algumas ideias de como podemos ajudar."
-    },
-    problem: {
-      opening: "Com base no que você compartilhou, gostaria de entender melhor sobre os desafios que vocês enfrentam. O que tem sido mais difícil de resolver?",
-      followUp: [
-        "Como esse problema afeta o dia a dia da sua equipe?",
-        "Quais soluções vocês já tentaram implementar?"
-      ],
-      closing: "Entendo a complexidade dessa situação. Vamos ver como podemos ajudar a resolver esses desafios."
-    },
-    implication: {
-      opening: "Como você acha que esses problemas estão impactando seus resultados?",
-      followUp: [
-        "Se nada mudar, qual seria o impacto a longo prazo?",
-        "Como isso afeta a satisfação dos seus clientes?"
-      ],
-      closing: "Agora tenho uma visão mais clara das consequências desses desafios."
-    },
-    need: {
-      opening: "Com base no que conversamos, acredito que nossa solução pode ajudar vocês. Gostaria de apresentar algumas ideias?",
-      followUp: [
-        "Como você imagina que uma solução eficaz resolveria esses problemas?",
-        "Quais seriam os benefícios mais importantes para sua empresa?"
-      ],
-      closing: "Fico feliz em saber que vê valor nessas soluções. Podemos agendar uma demonstração para você ver na prática?"
-    }
-  });
+  // Get agent configuration
+  const agentConfig = useQuery(api.agentConfigurations.getByOrg, 
+    organization?.id ? { clerkOrgId: organization.id } : "skip"
+  );
+  
+  // Get active prompt
+  const activePrompt = useQuery(api.aiPrompts.getActivePrompt,
+    agentConfig ? { orgId: agentConfig.orgId } : "skip"
+  );
+  
+  // Mutations
+  const updateAgentSettings = useMutation(api.agentConfigurations.updateSettings);
+  const createOrUpdatePrompt = useMutation(api.aiPrompts.createOrUpdatePrompt);
+  
+  // State
+  const [prompt, setPrompt] = useState(`Você é um SDR (Sales Development Representative) especialista na metodologia SPIN.
 
-  const handleSavePrompts = () => {
-    // In a real implementation, this would save to Convex
-    console.log("Saving prompts to Convex");
+SUA FUNÇÃO:
+- Qualificar prospects através de perguntas estratégicas
+- Identificar oportunidades de negócio
+- Agendar reuniões com vendedores seniores
+
+METODOLOGIA SPIN:
+- Situation: Entenda a situação atual do prospect
+- Problem: Identifique problemas e dores
+- Implication: Explore as consequências dos problemas  
+- Need-payoff: Ajude o prospect a perceber o valor da solução
+
+DIRETRIZES:
+- Faça uma pergunta por vez
+- Seja conversacional e natural
+- Use português brasileiro
+- Mantenha respostas concisas (2-3 frases)
+- Seja profissional mas amigável
+- Progrida logicamente através das etapas SPIN
+
+EXEMPLO DE CONVERSA:
+1. "Olá! Vi que sua empresa trabalha com [setor]. Como vocês lidam atualmente com [desafio comum do setor]?"
+2. "Interessante! Esse processo atual está funcionando bem para vocês ou vocês enfrentam algum tipo de dificuldade?"
+3. "E como essas dificuldades impactam o dia a dia da sua equipe?"
+4. "Se vocês tivessem uma solução que resolvesse isso, qual seria o benefício mais importante?"
+
+Lembre-se: Seu objetivo é descobrir se existe fit e agendar uma conversa com nosso time comercial.`);
+
+  const [responseDelay, setResponseDelay] = useState(2);
+  const [personality, setPersonality] = useState("professional");
+  const [language, setLanguage] = useState("pt-br");
+
+  // Load existing data
+  useEffect(() => {
+    if (activePrompt?.content) {
+      setPrompt(activePrompt.content);
+    }
+  }, [activePrompt]);
+
+  useEffect(() => {
+    if (agentConfig) {
+      setPersonality(agentConfig.personality || "professional");
+      setResponseDelay(agentConfig.responseTime || 2);
+      setLanguage(agentConfig.language || "pt-br");
+    }
+  }, [agentConfig]);
+
+  const handleSave = async () => {
+    if (!agentConfig) {
+      toast.error("Configuração do agente não encontrada");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Save prompt
+      await createOrUpdatePrompt({
+        orgId: agentConfig.orgId,
+        content: prompt,
+        kind: "spin_sdr"
+      });
+      
+      // Save agent settings
+      await updateAgentSettings({
+        orgId: agentConfig.orgId,
+        responseTime: responseDelay,
+        personality: personality,
+        language: language,
+        toneOfVoice: personality
+      });
+      
+      toast.success("Configurações salvas com sucesso!");
+    } catch (error) {
+      console.error("Error saving settings:", error);
+      toast.error("Erro ao salvar configurações");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium">Configurações de IA</h3>
-        <p className="text-sm text-muted-foreground">
-          Personalize os prompts e comportamento da IA do agente SDR
-        </p>
-      </div>
-
       <div className="grid gap-6 md:grid-cols-3">
-        <div className="md:col-span-1 space-y-4">
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5" />
-                Etapas SPIN
-              </CardTitle>
-              <CardDescription>
-                Selecione uma etapa para configurar os prompts
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {SPIN_STAGES.map((stage) => (
-                <Button
-                  key={stage.id}
-                  variant={selectedStage === stage.id ? "default" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedStage(stage.id)}
-                >
-                  <MessageSquare className="mr-2 h-4 w-4" />
-                  {stage.name}
-                </Button>
-              ))}
-            </CardContent>
-          </Card>
-
+        {/* Prompt Principal */}
+        <div className="md:col-span-2">
           <Card className="glass">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Bot className="h-5 w-5" />
-                Personalidade
+                Prompt do Agente SDR
               </CardTitle>
               <CardDescription>
-                Escolha como o agente se comporta
+                Configure como o agente se comporta e responde aos prospects
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {PERSONALITIES.map((personality) => (
-                <Button
-                  key={personality.id}
-                  variant={selectedPersonality === personality.id ? "default" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedPersonality(personality.id)}
-                >
-                  {personality.name}
-                </Button>
-              ))}
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="prompt">Instruções para a IA</Label>
+                <Textarea
+                  id="prompt"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Digite as instruções para o agente SDR..."
+                  className="min-h-[400px] text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Este prompt define como o agente responde e se comporta nas conversas
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        <div className="md:col-span-2 space-y-6">
+        {/* Configurações */}
+        <div className="md:col-span-1">
           <Card className="glass">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Prompts da Etapa: {SPIN_STAGES.find(s => s.id === selectedStage)?.name}
+                <Settings className="h-5 w-5" />
+                Configurações
               </CardTitle>
               <CardDescription>
-                {SPIN_STAGES.find(s => s.id === selectedStage)?.description}
+                Ajustes de comportamento do agente
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="opening">Mensagem de Abertura</Label>
-                <Textarea
-                  id="opening"
-                  value={prompts[selectedStage as keyof typeof prompts].opening}
-                  onChange={(e) => setPrompts({
-                    ...prompts,
-                    [selectedStage]: {
-                      ...prompts[selectedStage as keyof typeof prompts],
-                      opening: e.target.value
-                    }
-                  })}
-                  placeholder="Digite o prompt de abertura..."
-                  className="min-h-[100px]"
+                <Label htmlFor="delay">Tempo de Resposta (segundos)</Label>
+                <Input
+                  id="delay"
+                  type="number"
+                  value={responseDelay}
+                  onChange={(e) => setResponseDelay(Number(e.target.value))}
+                  min="1"
+                  max="30"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Simula tempo de digitação humano
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label>Perguntas de Follow-up</Label>
-                <div className="space-y-3">
-                  {prompts[selectedStage as keyof typeof prompts].followUp.map((question, index) => (
-                    <div key={index} className="flex gap-2">
-                      <Input
-                        value={question}
-                        onChange={(e) => {
-                          const newFollowUp = [...prompts[selectedStage as keyof typeof prompts].followUp];
-                          newFollowUp[index] = e.target.value;
-                          setPrompts({
-                            ...prompts,
-                            [selectedStage]: {
-                              ...prompts[selectedStage as keyof typeof prompts],
-                              followUp: newFollowUp
-                            }
-                          });
-                        }}
-                        placeholder={`Pergunta de follow-up ${index + 1}`}
-                      />
-                    </div>
-                  ))}
-                  <Button 
-                    variant="outline" 
-                    onClick={() => {
-                      const newFollowUp = [...prompts[selectedStage as keyof typeof prompts].followUp, ""];
-                      setPrompts({
-                        ...prompts,
-                        [selectedStage]: {
-                          ...prompts[selectedStage as keyof typeof prompts],
-                          followUp: newFollowUp
-                        }
-                      });
-                    }}
-                  >
-                    Adicionar Pergunta
-                  </Button>
-                </div>
+                <Label htmlFor="personality">Personalidade</Label>
+                <select 
+                  id="personality"
+                  value={personality}
+                  onChange={(e) => setPersonality(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-md bg-background"
+                >
+                  <option value="professional">Profissional</option>
+                  <option value="friendly">Amigável</option>
+                  <option value="energetic">Energético</option>
+                  <option value="consultative">Consultivo</option>
+                </select>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="closing">Mensagem de Encerramento</Label>
-                <Textarea
-                  id="closing"
-                  value={prompts[selectedStage as keyof typeof prompts].closing}
-                  onChange={(e) => setPrompts({
-                    ...prompts,
-                    [selectedStage]: {
-                      ...prompts[selectedStage as keyof typeof prompts],
-                      closing: e.target.value
-                    }
-                  })}
-                  placeholder="Digite o prompt de encerramento..."
-                  className="min-h-[100px]"
-                />
+                <Label htmlFor="language">Idioma</Label>
+                <select 
+                  id="language"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-md bg-background"
+                >
+                  <option value="pt-br">Português (Brasil)</option>
+                  <option value="en-us">English (US)</option>
+                  <option value="es">Español</option>
+                </select>
               </div>
 
-              <Button onClick={handleSavePrompts}>
+              <Button 
+                onClick={handleSave} 
+                disabled={loading}
+                className="w-full"
+              >
                 <Save className="mr-2 h-4 w-4" />
-                Salvar Prompts
+                {loading ? "Salvando..." : "Salvar Configurações"}
               </Button>
             </CardContent>
           </Card>
 
-          <Card className="glass">
+          {/* Status */}
+          <Card className="glass mt-4">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5" />
-                Configurações Adicionais
-              </CardTitle>
-              <CardDescription>
-                Ajustes finos no comportamento da IA
-              </CardDescription>
+              <CardTitle className="text-sm">Status do Sistema</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Respostas Personalizadas</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Adaptar respostas com base no contexto da conversa
-                    </p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Atraso de Resposta</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Simular tempo de digitação humano (segundos)
-                    </p>
-                  </div>
-                  <Input 
-                    type="number" 
-                    defaultValue="2" 
-                    className="w-20 text-right" 
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Idioma</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Idioma principal das respostas
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Languages className="h-4 w-4" />
-                    <select className="bg-slate-800 border border-slate-700 rounded-md px-2 py-1">
-                      <option>Português (Brasil)</option>
-                      <option>English (US)</option>
-                      <option>Español</option>
-                    </select>
-                  </div>
-                </div>
+            <CardContent>
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span className="text-sm text-foreground">
+                  Agente ativo e funcionando
+                </span>
               </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Último prompt salvo: {activePrompt ? "Carregado" : "Padrão"}
+              </p>
             </CardContent>
           </Card>
         </div>

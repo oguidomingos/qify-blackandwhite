@@ -85,3 +85,70 @@ export const getByInstanceName = query({
     return null;
   },
 });
+
+export const createDemo = mutation({
+  args: {},
+  handler: async (ctx) => {
+    // Create demo organization
+    const orgId = await ctx.db.insert("organizations", {
+      name: "Demo Organization",
+      clerkOrgId: "demo-org-qify-5561999449983",
+      billingPlan: "starter",
+      onboardingStep: "completed",
+      onboardingCompleted: true,
+      createdAt: Date.now(),
+    });
+    
+    // Create agent configuration
+    await ctx.db.insert("agent_configurations", {
+      orgId: orgId,
+      agentName: "SDR Agent",
+      phoneNumber: "5561999449983",
+      personality: "professional",
+      toneOfVoice: "Profissional e consultivo",
+      language: "pt-BR",
+      responseTime: 3,
+      workingHours: {
+        start: "09:00",
+        end: "18:00",
+        timezone: "America/Sao_Paulo",
+        workDays: ["mon", "tue", "wed", "thu", "fri"]
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    
+    // Create WhatsApp account
+    await ctx.db.insert("whatsapp_accounts", {
+      orgId: orgId,
+      provider: "evolution",
+      instanceId: "qify-5561999449983",
+      phoneNumber: "5561999449983",
+      sharedToken: "shared_token_32_characters_long",
+      baseUrl: "https://evolutionapi.centralsupernova.com.br",
+      token: "509dbd54-c20c-4a5b-b889-a0494a861f5a",
+      createdAt: Date.now(),
+    });
+    
+    return { orgId, status: "success" };
+  },
+});
+
+export const addWhatsAppAccount = mutation({
+  args: { orgId: v.id("organizations") },
+  handler: async (ctx, { orgId }) => {
+    // Create WhatsApp account for existing organization
+    await ctx.db.insert("whatsapp_accounts", {
+      orgId: orgId,
+      provider: "evolution",
+      instanceId: "qify-5561999449983",
+      phoneNumber: "5561999449983",
+      sharedToken: "shared_token_32_characters_long",
+      baseUrl: "https://evolutionapi.centralsupernova.com.br",
+      token: "509dbd54-c20c-4a5b-b889-a0494a861f5a",
+      createdAt: Date.now(),
+    });
+    
+    return { status: "success" };
+  },
+});

@@ -21,18 +21,17 @@ export const generateAiReply = action({
         limit: 10,
       });
 
-      // Get active AI prompt
-      const prompt = await ctx.runQuery(internal.ai.queryActivePrompt, {
+      // Get full prompt (system message + user methodology)
+      const promptData = await ctx.runQuery("aiPrompts:getFullPrompt", {
         orgId,
-        kind: "spin_sdr",
       });
 
-      if (!prompt) {
-        console.log("No active prompt found, using default");
+      if (!promptData) {
+        console.log("No prompt data found, using default");
       }
 
       // Build conversation context for Gemini
-      const conversationContext = buildSpinConversation(messages, session, prompt);
+      const conversationContext = buildSpinConversation(messages, session, promptData);
 
       // Call Gemini API
       const response = await callGemini(conversationContext);
@@ -58,12 +57,12 @@ export const generateAiReply = action({
         text: response,
       });
 
-      // Send via WhatsApp - temporarily disabled for compilation
-      // await ctx.runAction(internal.wa.sendMessage, {
-      //   orgId,
-      //   to: contact.externalId,
-      //   text: response,
-      // });
+      // Send via WhatsApp
+      await ctx.runAction(internal.wa.sendMessage, {
+        orgId,
+        to: contact.externalId,
+        text: response,
+      });
 
       // Update session with AI insights
       await updateSessionFromResponse(ctx, sessionId, response, session);
@@ -90,8 +89,8 @@ export const queryActivePrompt = internalQuery({
   },
 });
 
-function buildSpinConversation(messages: any[], session: any, prompt: any) {
-  const systemPrompt = prompt?.content || getDefaultSpinPrompt();
+function buildSpinConversation(messages: any[], session: any, promptData: any) {
+  const systemPrompt = promptData?.fullPrompt || getDefaultSpinPrompt();
   
   const conversationHistory = messages
     .map((msg: any) => `${msg.direction === "inbound" ? "User" : "Assistant"}: ${msg.text}`)

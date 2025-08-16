@@ -5,6 +5,7 @@ const isProtectedRoute = createRouteMatcher([
   "/inbox(.*)",
   "/sessions(.*)",
   "/settings(.*)",
+  "/ai-settings",
 ]);
 
 const isPublicApiRoute = createRouteMatcher([
@@ -18,10 +19,9 @@ export default clerkMiddleware((auth, req) => {
     return;
   }
 
-  // Temporary: Allow dashboard access for demo purposes
-  // In production, uncomment the lines below to protect routes
+  // Protect routes that require authentication
   if (isProtectedRoute(req)) {
-    // auth().protect(); // Commented out for demo
+    auth().protect();
   }
 });
 

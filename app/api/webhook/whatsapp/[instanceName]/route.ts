@@ -75,18 +75,16 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     
     console.log('Message saved:', savedMessage._id);
     
-    // Trigger AI processing with batching delay
-    setTimeout(async () => {
-      try {
-        await convex.action("ai:generateAiReply" as any, {
-          orgId: orgQuery._id,
-          sessionId: session._id
-        });
-        console.log('AI processing triggered for session:', session._id);
-      } catch (error) {
-        console.error('Error triggering AI processing:', error);
-      }
-    }, 3000); // 3 second delay for batching
+    // Trigger AI processing immediately (no setTimeout in serverless)
+    try {
+      await convex.action("ai:generateAiReply" as any, {
+        orgId: orgQuery._id,
+        sessionId: session._id
+      });
+      console.log('AI processing triggered for session:', session._id);
+    } catch (error) {
+      console.error('Error triggering AI processing:', error);
+    }
     
     return { success: true, sessionId: session._id, messageId: savedMessage._id };
     

@@ -15,6 +15,7 @@ import type {
 } from "convex/server";
 import type * as agentConfigurations from "../agentConfigurations.js";
 import type * as ai from "../ai.js";
+import type * as aiPrompts from "../aiPrompts.js";
 import type * as auth from "../auth.js";
 import type * as businessProfiles from "../businessProfiles.js";
 import type * as contacts from "../contacts.js";
@@ -24,6 +25,7 @@ import type * as organizationSettings from "../organizationSettings.js";
 import type * as organizations from "../organizations.js";
 import type * as sessions from "../sessions.js";
 import type * as syncStatus from "../syncStatus.js";
+import type * as wa from "../wa.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -36,6 +38,7 @@ import type * as syncStatus from "../syncStatus.js";
 declare const fullApi: ApiFromModules<{
   agentConfigurations: typeof agentConfigurations;
   ai: typeof ai;
+  aiPrompts: typeof aiPrompts;
   auth: typeof auth;
   businessProfiles: typeof businessProfiles;
   contacts: typeof contacts;
@@ -45,6 +48,7 @@ declare const fullApi: ApiFromModules<{
   organizations: typeof organizations;
   sessions: typeof sessions;
   syncStatus: typeof syncStatus;
+  wa: typeof wa;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
