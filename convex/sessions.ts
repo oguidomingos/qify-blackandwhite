@@ -62,7 +62,7 @@ export const getActiveByContact = query({
   handler: async (ctx: any, { contactId }: any) => {
     return await ctx.db
       .query("sessions")
-      .filter((q) => q.and(
+      .filter((q: any) => q.and(
         q.eq(q.field("contactId"), contactId),
         q.eq(q.field("status"), "active")
       ))
