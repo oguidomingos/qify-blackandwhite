@@ -84,3 +84,4 @@ inspire.html
 
 # Claude assistant files
 .claude/
+.vercel

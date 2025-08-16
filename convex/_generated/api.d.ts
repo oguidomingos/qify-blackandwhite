@@ -24,7 +24,6 @@ import type * as organizationSettings from "../organizationSettings.js";
 import type * as organizations from "../organizations.js";
 import type * as sessions from "../sessions.js";
 import type * as syncStatus from "../syncStatus.js";
-import type * as webhooks from "../webhooks.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -46,7 +45,6 @@ declare const fullApi: ApiFromModules<{
   organizations: typeof organizations;
   sessions: typeof sessions;
   syncStatus: typeof syncStatus;
-  webhooks: typeof webhooks;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
