@@ -138,6 +138,8 @@ function buildEnhancedSpinConversation(messages: any[], session: any, promptData
 
   // Extract collected data from user responses
   const collectedInfo = analyzeCollectedData(userResponses);
+  console.log('Collected info analysis:', JSON.stringify(collectedInfo));
+  console.log('User responses:', JSON.stringify(userResponses));
   
   // Build conversation history with clear separation
   const conversationHistory = messages
@@ -156,6 +158,7 @@ function buildEnhancedSpinConversation(messages: any[], session: any, promptData
   // Check if this is a new conversation
   const isFirstInteraction = messages.length <= 1;
   const hasName = collectedInfo.name.length > 0;
+  const hasPersonType = collectedInfo.personType.length > 0;
   const hasBusinessInfo = collectedInfo.business.length > 0;
 
   let contextInstructions = "";
@@ -172,14 +175,16 @@ function buildEnhancedSpinConversation(messages: any[], session: any, promptData
     contextInstructions = `
 📊 DADOS JÁ COLETADOS:
 ${collectedInfo.name.length > 0 ? `✅ Nome: ${collectedInfo.name.join(', ')}` : '❌ Nome: NÃO COLETADO'}
-${collectedInfo.business.length > 0 ? `✅ Negócio: ${collectedInfo.business.join(', ')}` : '❌ Tipo de negócio: NÃO COLETADO'}
+${collectedInfo.personType.length > 0 ? `✅ Tipo de Pessoa: ${collectedInfo.personType.join(', ')}` : '❌ Tipo pessoa (física/jurídica): NÃO COLETADO'}
+${collectedInfo.business.length > 0 ? `✅ Negócio/Empresa: ${collectedInfo.business.join(', ')}` : '❌ Empresa/Negócio: NÃO COLETADO'}
 ${collectedInfo.contact.length > 0 ? `✅ Contato: ${collectedInfo.contact.join(', ')}` : '❌ Contato adicional: NÃO COLETADO'}
 
-🚨 REGRAS CRÍTICAS:
+🚨 REGRAS CRÍTICAS - LEIA COM ATENÇÃO:
 - NUNCA repita perguntas sobre dados já coletados acima
-- Se o nome foi informado, PASSE para próxima etapa (tipo de negócio)
-- Se negócio foi informado, PASSE para qualificação SPIN
-- Use as informações coletadas para personalizar a conversa
+- Se já informou ser "pessoa jurídica" ou "represento empresa", NÃO pergunte novamente
+- Se já mencionou empresa (ex: Iceberg), passe para próxima etapa
+- SEMPRE use as informações coletadas para personalizar a conversa
+- OLHE OS DADOS COLETADOS ACIMA antes de fazer qualquer pergunta
 
 📝 SUAS ÚLTIMAS PERGUNTAS/RESPOSTAS:
 ${recentResponses.slice(-2).map((resp, i) => `${i + 1}. ${resp}`).join('\n')}
@@ -189,9 +194,9 @@ ${recentResponses.slice(-2).map((resp, i) => `${i + 1}. ${resp}`).join('\n')}
 - Frases: ${previousPhrases.slice(0, 3).join(' | ')}
 
 🎯 PRÓXIMA AÇÃO:
-${!hasName ? "Coletar NOME COMPLETO (se ainda não coletado)" : 
-  !hasBusinessInfo ? "Coletar TIPO DE NEGÓCIO/EMPRESA" : 
-  "Iniciar qualificação SPIN baseada nos dados coletados"}
+${!hasPersonType ? "Coletar se é PESSOA FÍSICA ou JURÍDICA" : 
+  hasPersonType && !hasBusinessInfo ? "Cliente já disse ser pessoa jurídica - PERGUNTAR SOBRE NECESSIDADE/PROBLEMA específico" : 
+  "Cliente já informou empresa - INICIAR QUALIFICAÇÃO SPIN sobre a necessidade específica"}
 `;
   }
 
@@ -224,28 +229,35 @@ function analyzeCollectedData(userResponses: string[]) {
   const info = {
     name: [] as string[],
     business: [] as string[],
-    contact: [] as string[]
+    contact: [] as string[],
+    personType: [] as string[] // física/jurídica
   };
 
   userResponses.forEach(response => {
     const text = response.toLowerCase();
+    const originalResponse = response.trim();
     
-    // Detect names (simple heuristic)
-    if (/^[a-záêçõúíó\s]{2,30}$/.test(response.trim()) && 
-        response.split(' ').length >= 1 && 
-        response.split(' ').length <= 4 &&
-        !/(sim|não|ok|tudo|bem|oi|olá|empresa|negócio)/.test(text)) {
-      info.name.push(response.trim());
+    // Detect person type (física/jurídica)
+    if (/(pessoa\s+(física|juridica|jurídica)|física|jurídica|pj|pf|represento|empresa|iceberg)/i.test(originalResponse)) {
+      info.personType.push(originalResponse);
     }
     
-    // Detect business/company info
-    if (/(empresa|negócio|trabalho|atuo|sou|faço|vendo|presto|serviço)/.test(text)) {
-      info.business.push(response.trim());
+    // Detect names (simple heuristic) - but exclude business-related responses
+    if (/^[a-záêçõúíó\s]{2,30}$/i.test(originalResponse) && 
+        originalResponse.split(' ').length >= 1 && 
+        originalResponse.split(' ').length <= 4 &&
+        !/(sim|não|ok|tudo|bem|oi|olá|empresa|negócio|pessoa|física|jurídica|represento|sou)/i.test(text)) {
+      info.name.push(originalResponse);
+    }
+    
+    // Detect business/company info - expanded patterns
+    if (/(empresa|negócio|trabalho|atuo|sou|faço|vendo|presto|serviço|represento|iceberg|ltda|ltd|s\.a\.|sa|mei)/i.test(text)) {
+      info.business.push(originalResponse);
     }
     
     // Detect contact info
-    if (/(whatsapp|telefone|email|contato|\@|\.com)/.test(text)) {
-      info.contact.push(response.trim());
+    if (/(whatsapp|telefone|email|contato|\@|\.com)/i.test(text)) {
+      info.contact.push(originalResponse);
     }
   });
 
@@ -253,6 +265,7 @@ function analyzeCollectedData(userResponses: string[]) {
   info.name = [...new Set(info.name)];
   info.business = [...new Set(info.business)];
   info.contact = [...new Set(info.contact)];
+  info.personType = [...new Set(info.personType)];
 
   return info;
 }
