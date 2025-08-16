@@ -9,6 +9,20 @@ export const generateAiReply = action({
   },
   handler: async (ctx: any, { orgId, sessionId }: any) => {
     try {
+      // Check and set processing lock with batching logic
+      const shouldProcess = await ctx.runMutation(internal.sessions.checkAndSetProcessing, {
+        sessionId
+      });
+      
+      if (!shouldProcess) {
+        console.log('Skipping AI processing - already being processed or in cooldown');
+        return { skipped: true, reason: "batching_or_cooldown" };
+      }
+
+      // Wait for potential additional messages (batching delay)
+      console.log('Waiting 3 seconds for message batching...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
       // Get session data
       const session = await ctx.runQuery(internal.sessions.getById, { sessionId });
       if (!session) {

@@ -75,33 +75,17 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     
     console.log('Message saved:', savedMessage._id);
     
-    // Check if AI should process this message (database-based batching)
-    const shouldProcess = await convex.mutation("sessions:checkAndSetProcessing" as any, {
-      sessionId: session._id
-    });
-    
-    if (!shouldProcess) {
-      console.log('Skipping AI processing - already being processed or in cooldown');
-      return { success: true, sessionId: session._id, messageId: savedMessage._id, skipped: "batching" };
+    // Trigger AI processing immediately - let AI function handle batching
+    console.log('Triggering AI processing for session:', session._id);
+    try {
+      await convex.action("ai:generateAiReply" as any, {
+        orgId: orgQuery._id,
+        sessionId: session._id
+      });
+      console.log('AI processing triggered for session:', session._id);
+    } catch (error) {
+      console.error('Error triggering AI processing:', error);
     }
-    
-    // Schedule AI processing with delay for batching
-    console.log('Scheduling AI processing with batching delay');
-    setTimeout(async () => {
-      try {
-        await convex.action("ai:generateAiReply" as any, {
-          orgId: orgQuery._id,
-          sessionId: session._id
-        });
-        console.log('Delayed AI processing completed for session:', session._id);
-      } catch (error) {
-        console.error('Error in delayed AI processing:', error);
-        // Reset processing flag on error
-        await convex.mutation("sessions:resetProcessing" as any, {
-          sessionId: session._id
-        });
-      }
-    }, 3000); // 3 second delay for message batching
     
     return { success: true, sessionId: session._id, messageId: savedMessage._id };
     
