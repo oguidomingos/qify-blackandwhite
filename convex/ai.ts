@@ -44,6 +44,8 @@ export const generateAiReply = action({
 
       if (!promptData) {
         console.log("No prompt data found, using default");
+      } else {
+        console.log("Using custom prompt data from database");
       }
 
       // Build enhanced conversation context with better memory
@@ -125,72 +127,71 @@ export const queryActivePrompt = internalQuery({
 function buildEnhancedSpinConversation(messages: any[], session: any, promptData: any) {
   const systemPrompt = promptData?.fullPrompt || getDefaultSpinPrompt();
   
-  // Build more detailed conversation history with timestamps
+  // Analyze collected information from messages
+  const userResponses = messages
+    .filter(msg => msg.direction === "inbound")
+    .map(msg => msg.text);
+  
+  const assistantResponses = messages
+    .filter(msg => msg.direction === "outbound")
+    .map(msg => msg.text);
+
+  // Extract collected data from user responses
+  const collectedInfo = analyzeCollectedData(userResponses);
+  
+  // Build conversation history with clear separation
   const conversationHistory = messages
-    .map((msg: any) => {
+    .map((msg: any, index: number) => {
       const timestamp = new Date(msg.createdAt).toLocaleTimeString('pt-BR');
-      return `[${timestamp}] ${msg.direction === "inbound" ? "Cliente" : "Assistente"}: ${msg.text}`;
+      const role = msg.direction === "inbound" ? "👤 CLIENTE" : "🤖 ASSISTENTE";
+      return `${index + 1}. [${timestamp}] ${role}: ${msg.text}`;
     })
     .join("\n");
 
   // Analyze conversation patterns to avoid repetition
-  const outboundMessages = messages.filter(msg => msg.direction === "outbound");
-  const recentResponses = outboundMessages.slice(-3).map(msg => msg.text);
-  
-  // Extract unique questions and phrases to avoid repetition
+  const recentResponses = assistantResponses.slice(-3);
   const previousQuestions = extractQuestions(recentResponses);
   const previousPhrases = extractKeyPhrases(recentResponses);
   
-  // Check if this is a new conversation or first interaction
-  const isFirstInteraction = messages.length <= 1 || 
-    !session.variables.spin || 
-    !session.variables.spin.situation?.answers?.length;
-
-  // Get last few inbound messages for context
-  const recentInbound = messages
-    .filter(msg => msg.direction === "inbound")
-    .slice(-3)
-    .map(msg => msg.text)
-    .join(" ");
+  // Check if this is a new conversation
+  const isFirstInteraction = messages.length <= 1;
+  const hasName = collectedInfo.name.length > 0;
+  const hasBusinessInfo = collectedInfo.business.length > 0;
 
   let contextInstructions = "";
   
   if (isFirstInteraction) {
     contextInstructions = `
-CONTEXTO IMPORTANTE: Esta é uma nova conversa. Você DEVE:
-1. Cumprimentar de forma calorosa e profissional
-2. Iniciar a coleta de dados básicos (nome, tipo de negócio)
-3. NÃO assumir contexto anterior
-4. Seguir metodologia SPIN começando pela etapa SITUAÇÃO
-5. Fazer UMA pergunta por vez
-6. Ser natural e conversacional
-7. Falar em português brasileiro
-
-Etapa atual: SITUAÇÃO (coleta de dados básicos)
+🆕 PRIMEIRA INTERAÇÃO:
+- Cumprimente de forma calorosa e profissional
+- Inicie coleta do NOME COMPLETO
+- Uma pergunta por vez
+- Seja natural e empático
 `;
   } else {
-    const spinContext = session.variables.spin ? `
-Etapa SPIN atual: ${session.variables.spin.stage}
-Pontuação: ${session.variables.spin.score}/100
-Respostas de Situação: ${session.variables.spin.situation.answers.join(", ")}
-Respostas de Problema: ${session.variables.spin.problem.answers.join(", ")}
-Respostas de Implicação: ${session.variables.spin.implication.answers.join(", ")}
-Respostas de Necessidade: ${session.variables.spin.needPayoff.answers.join(", ")}
-` : "";
-    
-    contextInstructions = `${spinContext}
+    contextInstructions = `
+📊 DADOS JÁ COLETADOS:
+${collectedInfo.name.length > 0 ? `✅ Nome: ${collectedInfo.name.join(', ')}` : '❌ Nome: NÃO COLETADO'}
+${collectedInfo.business.length > 0 ? `✅ Negócio: ${collectedInfo.business.join(', ')}` : '❌ Tipo de negócio: NÃO COLETADO'}
+${collectedInfo.contact.length > 0 ? `✅ Contato: ${collectedInfo.contact.join(', ')}` : '❌ Contato adicional: NÃO COLETADO'}
 
-INSTRUÇÕES PARA EVITAR REPETIÇÃO:
-- Suas últimas respostas foram: ${recentResponses.join(' | ')}
-- Mensagens recentes do cliente: ${recentInbound}
-- Perguntas já feitas: ${previousQuestions.join(', ')}
-- Frases já usadas: ${previousPhrases.join(', ')}
-- NÃO repita perguntas já feitas
-- NÃO use frases similares às anteriores
-- Use vocabulário e estruturas completamente diferentes
-- Avance naturalmente na conversa baseado no que já foi coletado
-- Se o cliente não respondeu uma pergunta, reformule de forma COMPLETAMENTE diferente
-- Varie entre abordagens diretas e indiretas
+🚨 REGRAS CRÍTICAS:
+- NUNCA repita perguntas sobre dados já coletados acima
+- Se o nome foi informado, PASSE para próxima etapa (tipo de negócio)
+- Se negócio foi informado, PASSE para qualificação SPIN
+- Use as informações coletadas para personalizar a conversa
+
+📝 SUAS ÚLTIMAS PERGUNTAS/RESPOSTAS:
+${recentResponses.slice(-2).map((resp, i) => `${i + 1}. ${resp}`).join('\n')}
+
+⚠️ EVITE REPETIR:
+- Perguntas: ${previousQuestions.slice(0, 3).join(' | ')}
+- Frases: ${previousPhrases.slice(0, 3).join(' | ')}
+
+🎯 PRÓXIMA AÇÃO:
+${!hasName ? "Coletar NOME COMPLETO (se ainda não coletado)" : 
+  !hasBusinessInfo ? "Coletar TIPO DE NEGÓCIO/EMPRESA" : 
+  "Iniciar qualificação SPIN baseada nos dados coletados"}
 `;
   }
 
@@ -203,15 +204,57 @@ INSTRUÇÕES PARA EVITAR REPETIÇÃO:
 
 ${contextInstructions}
 
-Histórico da conversa:
+📞 HISTÓRICO COMPLETO DA CONVERSA:
 ${conversationHistory}
 
-IMPORTANTE: Gere uma resposta apropriada seguindo a metodologia SPIN. ${isFirstInteraction ? "Comece do início com coleta de dados." : "Continue a partir da etapa atual e avance naturalmente sem repetir perguntas ou frases anteriores."}`
+🎯 GERE SUA PRÓXIMA RESPOSTA:
+- Use os dados já coletados
+- NÃO repita perguntas respondidas
+- Avance logicamente na metodologia
+- Seja natural e empático
+- Máximo 2-3 frases`
           }
         ]
       }
     ]
   };
+}
+
+function analyzeCollectedData(userResponses: string[]) {
+  const info = {
+    name: [] as string[],
+    business: [] as string[],
+    contact: [] as string[]
+  };
+
+  userResponses.forEach(response => {
+    const text = response.toLowerCase();
+    
+    // Detect names (simple heuristic)
+    if (/^[a-záêçõúíó\s]{2,30}$/.test(response.trim()) && 
+        response.split(' ').length >= 1 && 
+        response.split(' ').length <= 4 &&
+        !/(sim|não|ok|tudo|bem|oi|olá|empresa|negócio)/.test(text)) {
+      info.name.push(response.trim());
+    }
+    
+    // Detect business/company info
+    if (/(empresa|negócio|trabalho|atuo|sou|faço|vendo|presto|serviço)/.test(text)) {
+      info.business.push(response.trim());
+    }
+    
+    // Detect contact info
+    if (/(whatsapp|telefone|email|contato|\@|\.com)/.test(text)) {
+      info.contact.push(response.trim());
+    }
+  });
+
+  // Remove duplicates
+  info.name = [...new Set(info.name)];
+  info.business = [...new Set(info.business)];
+  info.contact = [...new Set(info.contact)];
+
+  return info;
 }
 
 async function callGemini(conversationContext: any): Promise<string> {
