@@ -7,100 +7,109 @@ import { useOrganization, useUser } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 
-const stats = [
-  {
-    title: "Mensagens Hoje",
-    value: "12",
-    description: "↗️ +2 desde ontem",
-    icon: MessageSquare,
-  },
-  {
-    title: "Contatos Ativos",
-    value: "8",
-    description: "3 novos esta semana",
-    icon: Users,
-  },
-  {
-    title: "Taxa de Resposta IA",
-    value: "2.3s",
-    description: "Tempo médio",
-    icon: Bot,
-  },
-  {
-    title: "Taxa de Conversão",
-    value: "94%",
-    description: "↗️ +5% este mês",
-    icon: TrendingUp,
-  },
-];
-
-const pendingContacts = [
-  {
-    id: "1",
-    name: "Sarah Chen",
-    platform: "whatsapp",
-    messages: 2,
-    lastMessage: "2 min atrás",
-  },
-  {
-    id: "2", 
-    name: "Marcus Silva",
-    platform: "whatsapp",
-    messages: 1,
-    lastMessage: "5 min atrás",
-  },
-  {
-    id: "3",
-    name: "Ana Costa",
-    platform: "telegram",
-    messages: 3,
-    lastMessage: "12 min atrás",
-  },
-];
-
 export default function DashboardPage() {
   const { organization } = useOrganization();
   const { user } = useUser();
   const orgId = organization?.id || user?.id;
 
+  // Get organization from Convex
+  const convexOrg = useQuery(api.organizations.getByClerkId, 
+    orgId ? { clerkId: orgId } : "skip"
+  );
+
   // Get real data from Convex
   const businessProfile = useQuery(
     api.businessProfiles.getByOrg,
-    orgId ? { clerkOrgId: orgId } : "skip"
+    convexOrg ? { orgId: convexOrg._id } : "skip"
   );
 
   const agentConfig = useQuery(
     api.agentConfigurations.getByOrg,
-    orgId ? { clerkOrgId: orgId } : "skip"
+    convexOrg ? { orgId: convexOrg._id } : "skip"
   );
 
-  // TODO: Add queries for real message and contact data when those schemas are implemented
+  // Get real contacts and messages data
+  const contacts = useQuery(api.contacts.listByOrg, 
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  const recentMessages = useQuery(api.messages.listByOrgRecent,
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  const sessions = useQuery(api.sessions.listByOrg,
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  // Calculate real stats
+  const todayMessages = recentMessages?.filter(msg => {
+    const today = new Date();
+    const msgDate = new Date(msg.createdAt);
+    return msgDate.toDateString() === today.toDateString();
+  }).length || 0;
+
+  const activeContacts = contacts?.length || 0;
+  const activeSessions = sessions?.filter(s => s.status === "active").length || 0;
+  const responseTime = agentConfig?.responseTime || 0;
+
   const realStats = [
     {
       title: "Mensagens Hoje",
-      value: "0", // Will be real data from messages table
-      description: "Nenhuma mensagem ainda",
+      value: todayMessages.toString(),
+      description: todayMessages > 0 ? "Mensagens processadas" : "Nenhuma mensagem hoje",
       icon: MessageSquare,
     },
     {
       title: "Contatos Ativos",
-      value: "0", // Will be real data from contacts table
-      description: "Aguardando primeiros contatos",
+      value: activeContacts.toString(),
+      description: activeContacts > 0 ? "Contatos em conversas" : "Nenhum contato ainda",
       icon: Users,
     },
     {
-      title: "Agente Configurado",
-      value: agentConfig ? "✓" : "✗",
-      description: agentConfig ? `${agentConfig.agentName}` : "Configure seu agente",
+      title: "Sessões Ativas",
+      value: activeSessions.toString(),
+      description: activeSessions > 0 ? "Conversas em andamento" : "Nenhuma sessão ativa",
       icon: Bot,
     },
     {
-      title: "Negócio Configurado",
-      value: businessProfile ? "✓" : "✗", 
-      description: businessProfile ? `${businessProfile.businessName}` : "Configure seu negócio",
+      title: "Tempo Resposta",
+      value: `${responseTime}s`,
+      description: responseTime > 0 ? "Configurado no agente" : "Configure tempo",
       icon: TrendingUp,
     },
   ];
+
+  // Get pending contacts (with recent activity)
+  const pendingContacts = contacts?.filter(contact => {
+    const hasRecentMessages = recentMessages?.some(msg => 
+      msg.contactId === contact._id && 
+      msg.direction === "inbound" &&
+      Date.now() - msg.createdAt < 3600000 // Last hour
+    );
+    return hasRecentMessages;
+  }).map(contact => {
+    const latestMessage = recentMessages?.find(msg => 
+      msg.contactId === contact._id && msg.direction === "inbound"
+    );
+    const messageCount = recentMessages?.filter(msg => msg.contactId === contact._id).length || 0;
+    
+    function formatTimeAgo(timestamp: number) {
+      const diff = Date.now() - timestamp;
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      if (minutes < 1) return "Agora";
+      if (minutes < 60) return `${minutes} min atrás`;
+      return `${hours}h atrás`;
+    }
+
+    return {
+      id: contact._id,
+      name: contact.name || "Contato sem nome",
+      platform: contact.channel || "whatsapp",
+      messages: messageCount,
+      lastMessage: latestMessage ? formatTimeAgo(latestMessage.createdAt) : "Sem mensagens",
+    };
+  }) || [];
 
   return (
     <div className="flex-1 space-y-6 p-8">
@@ -155,19 +164,45 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* TODO: Replace with real contacts data when available */}
-            <div className="text-center py-8">
-              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">
-                Nenhum contato pendente
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                {agentConfig?.phoneNumber 
-                  ? "Conecte seu WhatsApp nas configurações para receber mensagens"
-                  : "Complete a configuração do agente primeiro"
-                }
-              </p>
-            </div>
+            {!convexOrg && (
+              <div className="text-center py-8">
+                <div className="animate-pulse text-muted-foreground">
+                  Carregando contatos...
+                </div>
+              </div>
+            )}
+            {convexOrg && pendingContacts.length === 0 && (
+              <div className="text-center py-8">
+                <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">
+                  Nenhum contato pendente
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {agentConfig?.phoneNumber 
+                    ? "Aguardando mensagens do WhatsApp"
+                    : "Complete a configuração do agente primeiro"
+                  }
+                </p>
+              </div>
+            )}
+            {pendingContacts.map((contact) => (
+              <div key={contact.id} className="flex items-center justify-between p-3 rounded-lg border border-border/30">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Users className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">{contact.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {contact.platform} • {contact.messages} msg
+                    </p>
+                  </div>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {contact.lastMessage}
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
 
@@ -179,20 +214,64 @@ export default function DashboardPage() {
               Atividade Recente
             </CardTitle>
             <CardDescription>
-              Últimas ações do sistema
+              Últimas mensagens e sessões
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* TODO: Replace with real activity data when available */}
-            <div className="text-center py-8">
-              <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">
-                Nenhuma atividade recente
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                As atividades do sistema aparecerão aqui
-              </p>
-            </div>
+            {!convexOrg && (
+              <div className="text-center py-8">
+                <div className="animate-pulse text-muted-foreground">
+                  Carregando atividades...
+                </div>
+              </div>
+            )}
+            {convexOrg && (!recentMessages || recentMessages.length === 0) && (
+              <div className="text-center py-8">
+                <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">
+                  Nenhuma atividade recente
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  As mensagens aparecerão aqui quando chegarem
+                </p>
+              </div>
+            )}
+            {recentMessages?.slice(0, 5).map((message) => {
+              const contact = contacts?.find(c => c._id === message.contactId);
+              function formatTimeAgo(timestamp: number) {
+                const diff = Date.now() - timestamp;
+                const minutes = Math.floor(diff / 60000);
+                const hours = Math.floor(diff / 3600000);
+                if (minutes < 1) return "Agora";
+                if (minutes < 60) return `${minutes} min atrás`;
+                return `${hours}h atrás`;
+              }
+              
+              return (
+                <div key={message._id} className="flex items-start space-x-3 p-3 rounded-lg border border-border/30">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    message.direction === "inbound" ? "bg-blue-500/20" : "bg-green-500/20"
+                  }`}>
+                    <MessageSquare className={`w-4 h-4 ${
+                      message.direction === "inbound" ? "text-blue-400" : "text-green-400"
+                    }`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-foreground">
+                        {contact?.name || "Contato"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatTimeAgo(message.createdAt)}
+                      </p>
+                    </div>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {message.direction === "inbound" ? "📥" : "📤"} {message.text}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       </div>

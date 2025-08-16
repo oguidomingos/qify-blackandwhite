@@ -86,7 +86,52 @@ export const create = mutation({
       status: args.status,
       variables: {},
       lastActivityAt: now,
-      createdAt: now
+      createdAt: now,
+      processingLock: false,
+      lastProcessedAt: 0
+    });
+  },
+});
+
+export const checkAndSetProcessing = mutation({
+  args: { sessionId: v.id("sessions") },
+  handler: async (ctx: any, { sessionId }: any) => {
+    const session = await ctx.db.get(sessionId);
+    if (!session) return false;
+    
+    const now = Date.now();
+    const PROCESSING_TIMEOUT = 30000; // 30 seconds
+    const COOLDOWN_MS = 5000; // 5 seconds between AI responses
+    
+    // Check if already processing and not timed out
+    if (session.processingLock && 
+        session.lastProcessedAt && 
+        (now - session.lastProcessedAt) < PROCESSING_TIMEOUT) {
+      console.log('Session already being processed');
+      return false;
+    }
+    
+    // Check cooldown period
+    if (session.lastProcessedAt && (now - session.lastProcessedAt) < COOLDOWN_MS) {
+      console.log(`Session in cooldown period: ${Math.round((now - session.lastProcessedAt)/1000)}s`);
+      return false;
+    }
+    
+    // Set processing lock
+    await ctx.db.patch(sessionId, {
+      processingLock: true,
+      lastProcessedAt: now
+    });
+    
+    return true;
+  },
+});
+
+export const resetProcessing = mutation({
+  args: { sessionId: v.id("sessions") },
+  handler: async (ctx: any, { sessionId }: any) => {
+    await ctx.db.patch(sessionId, {
+      processingLock: false
     });
   },
 });

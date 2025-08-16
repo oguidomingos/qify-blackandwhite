@@ -15,11 +15,13 @@ export const generateAiReply = action({
         throw new Error("Session not found");
       }
 
-      // Get recent messages
+      // Get ALL messages for better context (increased from 10 to 20)
       const messages = await ctx.runQuery(internal.messages.listBySession, { 
         sessionId,
-        limit: 10,
+        limit: 20,
       });
+
+      console.log(`Processing AI reply for session ${sessionId} with ${messages.length} messages in context`);
 
       // Get full prompt (system message + user methodology)
       const promptData = await ctx.runQuery("aiPrompts:getFullPrompt", {
@@ -30,8 +32,8 @@ export const generateAiReply = action({
         console.log("No prompt data found, using default");
       }
 
-      // Build conversation context for Gemini
-      const conversationContext = buildSpinConversation(messages, session, promptData);
+      // Build enhanced conversation context with better memory
+      const conversationContext = buildEnhancedSpinConversation(messages, session, promptData);
 
       // Call Gemini API
       const response = await callGemini(conversationContext);
@@ -64,11 +66,28 @@ export const generateAiReply = action({
         text: response,
       });
 
-      // Update session with AI insights
+      // Update session with AI insights and reset processing lock
       await updateSessionFromResponse(ctx, sessionId, response, session);
+      
+      // Reset processing lock
+      await ctx.runMutation(internal.sessions.resetProcessing, {
+        sessionId
+      });
+      
+      console.log(`AI reply completed for session ${sessionId}: "${response.substring(0, 100)}..."`);
 
     } catch (error) {
       console.error("Error generating AI reply:", error);
+      
+      // Reset processing lock on error
+      try {
+        await ctx.runMutation(internal.sessions.resetProcessing, {
+          sessionId
+        });
+      } catch (resetError) {
+        console.error("Error resetting processing lock:", resetError);
+      }
+      
       throw error;
     }
   },
@@ -89,21 +108,77 @@ export const queryActivePrompt = internalQuery({
   },
 });
 
-function buildSpinConversation(messages: any[], session: any, promptData: any) {
+function buildEnhancedSpinConversation(messages: any[], session: any, promptData: any) {
   const systemPrompt = promptData?.fullPrompt || getDefaultSpinPrompt();
   
+  // Build more detailed conversation history with timestamps
   const conversationHistory = messages
-    .map((msg: any) => `${msg.direction === "inbound" ? "User" : "Assistant"}: ${msg.text}`)
+    .map((msg: any) => {
+      const timestamp = new Date(msg.createdAt).toLocaleTimeString('pt-BR');
+      return `[${timestamp}] ${msg.direction === "inbound" ? "Cliente" : "Assistente"}: ${msg.text}`;
+    })
     .join("\n");
 
-  const spinContext = session.variables.spin ? `
-Current SPIN stage: ${session.variables.spin.stage}
-Score: ${session.variables.spin.score}/100
-Situation answers: ${session.variables.spin.situation.answers.join(", ")}
-Problem answers: ${session.variables.spin.problem.answers.join(", ")}
-Implication answers: ${session.variables.spin.implication.answers.join(", ")}
-Need/Payoff answers: ${session.variables.spin.needPayoff.answers.join(", ")}
+  // Analyze conversation patterns to avoid repetition
+  const outboundMessages = messages.filter(msg => msg.direction === "outbound");
+  const recentResponses = outboundMessages.slice(-3).map(msg => msg.text);
+  
+  // Extract unique questions and phrases to avoid repetition
+  const previousQuestions = extractQuestions(recentResponses);
+  const previousPhrases = extractKeyPhrases(recentResponses);
+  
+  // Check if this is a new conversation or first interaction
+  const isFirstInteraction = messages.length <= 1 || 
+    !session.variables.spin || 
+    !session.variables.spin.situation?.answers?.length;
+
+  // Get last few inbound messages for context
+  const recentInbound = messages
+    .filter(msg => msg.direction === "inbound")
+    .slice(-3)
+    .map(msg => msg.text)
+    .join(" ");
+
+  let contextInstructions = "";
+  
+  if (isFirstInteraction) {
+    contextInstructions = `
+CONTEXTO IMPORTANTE: Esta é uma nova conversa. Você DEVE:
+1. Cumprimentar de forma calorosa e profissional
+2. Iniciar a coleta de dados básicos (nome, tipo de negócio)
+3. NÃO assumir contexto anterior
+4. Seguir metodologia SPIN começando pela etapa SITUAÇÃO
+5. Fazer UMA pergunta por vez
+6. Ser natural e conversacional
+7. Falar em português brasileiro
+
+Etapa atual: SITUAÇÃO (coleta de dados básicos)
+`;
+  } else {
+    const spinContext = session.variables.spin ? `
+Etapa SPIN atual: ${session.variables.spin.stage}
+Pontuação: ${session.variables.spin.score}/100
+Respostas de Situação: ${session.variables.spin.situation.answers.join(", ")}
+Respostas de Problema: ${session.variables.spin.problem.answers.join(", ")}
+Respostas de Implicação: ${session.variables.spin.implication.answers.join(", ")}
+Respostas de Necessidade: ${session.variables.spin.needPayoff.answers.join(", ")}
 ` : "";
+    
+    contextInstructions = `${spinContext}
+
+INSTRUÇÕES PARA EVITAR REPETIÇÃO:
+- Suas últimas respostas foram: ${recentResponses.join(' | ')}
+- Mensagens recentes do cliente: ${recentInbound}
+- Perguntas já feitas: ${previousQuestions.join(', ')}
+- Frases já usadas: ${previousPhrases.join(', ')}
+- NÃO repita perguntas já feitas
+- NÃO use frases similares às anteriores
+- Use vocabulário e estruturas completamente diferentes
+- Avance naturalmente na conversa baseado no que já foi coletado
+- Se o cliente não respondeu uma pergunta, reformule de forma COMPLETAMENTE diferente
+- Varie entre abordagens diretas e indiretas
+`;
+  }
 
   return {
     contents: [
@@ -112,12 +187,12 @@ Need/Payoff answers: ${session.variables.spin.needPayoff.answers.join(", ")}
           {
             text: `${systemPrompt}
 
-${spinContext}
+${contextInstructions}
 
-Conversation history:
+Histórico da conversa:
 ${conversationHistory}
 
-Generate an appropriate response following the SPIN selling methodology. Focus on the current stage and try to advance the conversation naturally.`
+IMPORTANTE: Gere uma resposta apropriada seguindo a metodologia SPIN. ${isFirstInteraction ? "Comece do início com coleta de dados." : "Continue a partir da etapa atual e avance naturalmente sem repetir perguntas ou frases anteriores."}`
           }
         ]
       }
@@ -156,31 +231,68 @@ async function callGemini(conversationContext: any): Promise<string> {
 }
 
 async function updateSessionFromResponse(ctx: any, sessionId: string, response: string, session: any) {
-  // Simple keyword-based analysis to update SPIN score and stage
+  // Enhanced session context management
   const keywords = {
-    situation: ["current", "now", "currently", "situation", "how", "what"],
-    problem: ["problem", "issue", "challenge", "difficulty", "trouble"],
-    implication: ["impact", "affect", "consequence", "result", "lead to"],
-    need: ["need", "want", "solution", "help", "improve"],
+    situation: ["nome", "empresa", "negócio", "trabalha", "atua", "ramo", "situação", "atual"],
+    problem: ["problema", "dificuldade", "desafio", "issue", "trouble", "complicação"],
+    implication: ["impacto", "afeta", "consequência", "resultado", "prejudica", "atrapalha"],
+    need: ["precisa", "necessita", "solução", "ajuda", "melhorar", "resolver"],
   };
 
-  let updatedVariables = session.variables;
+  let updatedVariables = { ...session.variables };
   
-  // Analyze response for stage progression
-  const responseWords = response.toLowerCase().split(/\s+/);
-  
-  // Update score based on keyword matches
-  let scoreBonus = 0;
-  Object.entries(keywords).forEach(([stage, words]) => {
-    const matches = words.filter((word: string) => responseWords.includes(word)).length;
-    if (matches > 0) {
-      scoreBonus += matches * 5;
-    }
-  });
-
-  if (updatedVariables.spin) {
-    updatedVariables.spin.score = Math.min(100, updatedVariables.spin.score + scoreBonus);
+  // Initialize SPIN structure if not exists
+  if (!updatedVariables.spin) {
+    updatedVariables.spin = {
+      situation: { answers: [], completed: false, lastAt: Date.now() },
+      problem: { answers: [], completed: false, lastAt: Date.now() },
+      implication: { answers: [], completed: false, lastAt: Date.now() },
+      needPayoff: { answers: [], completed: false, lastAt: Date.now() },
+      score: 0,
+      stage: "situation",
+      summary: ""
+    };
   }
+
+  // Analyze response content for stage progression
+  const responseWords = response.toLowerCase().split(/\s+/);
+  const now = Date.now();
+  
+  // Determine current stage based on keywords and context
+  let detectedStage = updatedVariables.spin.stage;
+  let stageProgressed = false;
+  
+  // Check for data collection questions
+  if (response.includes("nome") || response.includes("empresa") || response.includes("negócio")) {
+    detectedStage = "situation";
+    updatedVariables.spin.situation.lastAt = now;
+  } else if (keywords.problem.some(word => responseWords.includes(word))) {
+    detectedStage = "problem";
+    updatedVariables.spin.problem.lastAt = now;
+    stageProgressed = true;
+  } else if (keywords.implication.some(word => responseWords.includes(word))) {
+    detectedStage = "implication";
+    updatedVariables.spin.implication.lastAt = now;
+    stageProgressed = true;
+  } else if (keywords.need.some(word => responseWords.includes(word))) {
+    detectedStage = "needPayoff";
+    updatedVariables.spin.needPayoff.lastAt = now;
+    stageProgressed = true;
+  }
+
+  // Update stage and score
+  updatedVariables.spin.stage = detectedStage;
+  
+  if (stageProgressed) {
+    updatedVariables.spin.score = Math.min(100, updatedVariables.spin.score + 15);
+  } else {
+    updatedVariables.spin.score = Math.min(100, updatedVariables.spin.score + 5);
+  }
+
+  // Update conversation summary
+  updatedVariables.spin.summary = `Última resposta: ${response.substring(0, 100)}... (Etapa: ${detectedStage})`;
+
+  console.log(`Session updated - Stage: ${detectedStage}, Score: ${updatedVariables.spin.score}`);
 
   await ctx.runMutation(internal.sessions.updateVariables, {
     sessionId,
@@ -189,21 +301,77 @@ async function updateSessionFromResponse(ctx: any, sessionId: string, response: 
 }
 
 function getDefaultSpinPrompt(): string {
-  return `You are an expert SDR (Sales Development Representative) using the SPIN selling methodology. Your goal is to qualify leads through strategic questioning.
+  return `Você é um SDR (Sales Development Representative) especialista usando a metodologia SPIN selling. Seu objetivo é qualificar leads através de perguntas estratégicas.
 
-SPIN Framework:
-- Situation: Understand the prospect's current situation
-- Problem: Identify problems/pain points
-- Implication: Explore consequences of not solving the problem
-- Need-payoff: Help prospect realize the value of a solution
+Framework SPIN:
+- Situação: Entender a situação atual do prospect
+- Problema: Identificar problemas/dores
+- Implicação: Explorar consequências de não resolver o problema
+- Necessidade: Ajudar o prospect a perceber o valor de uma solução
 
-Guidelines:
-- Ask one question at a time
-- Listen actively and build on responses
-- Be conversational and natural
-- Progress through SPIN stages logically
-- Qualify budget, authority, need, and timeline
-- Keep responses concise (2-3 sentences max)
-- Use Brazilian Portuguese
-- Be professional but friendly`;
+DIRETRIZES CRÍTICAS:
+- Faça UMA pergunta por vez
+- Escute ativamente e construa sobre as respostas
+- Seja conversacional e natural
+- Progrida através das etapas SPIN logicamente
+- Qualifique orçamento, autoridade, necessidade e cronograma
+- Mantenha respostas concisas (máximo 2-3 frases)
+- Use português brasileiro
+- Seja profissional mas amigável
+
+REGRAS PARA EVITAR REPETIÇÃO:
+- NUNCA repita a mesma pergunta
+- NUNCA use frases idênticas ou similares
+- SEMPRE varie a forma de perguntar
+- Se o cliente não respondeu, reformule a pergunta de forma completamente diferente
+- Use sinônimos e estruturas diferentes
+- Adapte o tom baseado nas respostas anteriores
+- Mantenha o fluxo natural da conversa sem ser robótico`;
+}
+
+function extractQuestions(responses: string[]): string[] {
+  const questions: string[] = [];
+  responses.forEach(response => {
+    // Extract sentences ending with ? or containing question words
+    const sentences = response.split(/[.!?]/);
+    sentences.forEach(sentence => {
+      if (sentence.includes('?') || 
+          /\b(que|qual|quando|onde|como|por que|poderia|gostaria)\b/i.test(sentence)) {
+        const cleaned = sentence.replace(/[^\w\s]/g, '').trim();
+        if (cleaned.length > 5) {
+          questions.push(cleaned.toLowerCase());
+        }
+      }
+    });
+  });
+  return [...new Set(questions)]; // Remove duplicates
+}
+
+function extractKeyPhrases(responses: string[]): string[] {
+  const phrases: string[] = [];
+  responses.forEach(response => {
+    // Extract common greeting and transition phrases
+    const commonPhrases = [
+      /olá[^.!?]*/gi,
+      /tudo bem[^.!?]*/gi,
+      /para começar[^.!?]*/gi,
+      /poderia me[^.!?]*/gi,
+      /gostaria de[^.!?]*/gi,
+      /me conte[^.!?]*/gi,
+      /me fale[^.!?]*/gi,
+    ];
+    
+    commonPhrases.forEach(pattern => {
+      const matches = response.match(pattern);
+      if (matches) {
+        matches.forEach(match => {
+          const cleaned = match.replace(/[^\w\s]/g, '').trim();
+          if (cleaned.length > 5) {
+            phrases.push(cleaned.toLowerCase());
+          }
+        });
+      }
+    });
+  });
+  return [...new Set(phrases)]; // Remove duplicates
 }

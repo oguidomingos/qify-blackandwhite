@@ -15,6 +15,20 @@ export const listBySession = internalQuery({
   },
 });
 
+export const listBySessionPublic = query({
+  args: {
+    sessionId: v.id("sessions"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx: any, { sessionId, limit = 50 }: any) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_session_time", (q: any) => q.eq("sessionId", sessionId))
+      .order("desc") // Most recent first for batching check
+      .take(limit);
+  },
+});
+
 export const create = mutation({
   args: {
     sessionId: v.id("sessions"),

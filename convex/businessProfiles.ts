@@ -2,22 +2,34 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
 export const getByOrg = query({
-  args: { clerkOrgId: v.string() },
-  handler: async (ctx, { clerkOrgId }) => {
-    // First find the organization by Clerk ID
-    const organization = await ctx.db
-      .query("organizations")
-      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
-      .first();
+  args: { 
+    clerkOrgId: v.optional(v.string()),
+    orgId: v.optional(v.id("organizations"))
+  },
+  handler: async (ctx, { clerkOrgId, orgId }) => {
+    let targetOrgId = orgId;
     
-    if (!organization) {
+    if (clerkOrgId && !orgId) {
+      // First find the organization by Clerk ID
+      const organization = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+        .first();
+      
+      if (!organization) {
+        return null;
+      }
+      targetOrgId = organization._id;
+    }
+    
+    if (!targetOrgId) {
       return null;
     }
 
-    // Then find the business profile using the internal org ID
+    // Find the business profile using the internal org ID
     return await ctx.db
       .query("business_profiles")
-      .withIndex("by_org", (q: any) => q.eq("orgId", organization._id))
+      .withIndex("by_org", (q: any) => q.eq("orgId", targetOrgId))
       .first();
   },
 });

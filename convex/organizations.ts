@@ -2,11 +2,11 @@ import { v } from "convex/values";
 import { query, mutation, internalQuery } from "./_generated/server";
 
 export const getByClerkId = query({
-  args: { clerkOrgId: v.string() },
-  handler: async (ctx, { clerkOrgId }) => {
+  args: { clerkId: v.string() },
+  handler: async (ctx, { clerkId }) => {
     return await ctx.db
       .query("organizations")
-      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkId))
       .first();
   },
 });

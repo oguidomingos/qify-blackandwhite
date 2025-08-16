@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bot, Save, Settings, ArrowLeft } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useOrganization, useUser } from "@clerk/nextjs";
@@ -88,13 +88,16 @@ Como SDR especialista, use a metodologia SPIN para qualificar prospects e agenda
   const [responseDelay, setResponseDelay] = useState(2);
   const [personality, setPersonality] = useState("professional");
   const [language, setLanguage] = useState("pt-br");
+  const promptLoaded = useRef(false);
 
-  // Load existing data from Convex
+  // Load existing data from Convex (only once when first loaded)
   useEffect(() => {
-    if (activePrompt?.content) {
+    if (activePrompt?.content && !promptLoaded.current) {
       setPrompt(activePrompt.content);
+      promptLoaded.current = true;
     }
-  }, [activePrompt]);
+  }, [activePrompt?.content]);
+
 
   useEffect(() => {
     if (agentConfig) {

@@ -123,6 +123,12 @@ export const ensureAccountExists = internalMutation({
       .first();
 
     if (existing) {
+      // Update existing account with current environment variables
+      await ctx.db.patch(existing._id, {
+        baseUrl: process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+        token: process.env.EVOLUTION_API_TOKEN || "",
+        sharedToken: process.env.EVOLUTION_API_TOKEN || "",
+      });
       return existing._id;
     }
 

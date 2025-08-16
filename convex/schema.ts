@@ -161,6 +161,8 @@ export default defineSchema({
         })
       ),
     }),
+    processingLock: v.optional(v.boolean()), // For batching control
+    lastProcessedAt: v.optional(v.number()), // Timestamp of last AI processing
     lastActivityAt: v.number(),
     createdAt: v.number(),
   })
