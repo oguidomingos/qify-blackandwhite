@@ -97,12 +97,12 @@ export default function AgentConfigurationStep({ onNext, orgData }: AgentConfigu
 
   // Get existing agent configuration
   const agentConfig = useQuery(api.agentConfigurations.getByOrg, {
-    orgId: orgData._id,
+    clerkOrgId: orgData._id,
   });
 
   // Get business profile for default agent name
   const businessProfile = useQuery(api.businessProfiles.getByOrg, {
-    orgId: orgData._id,
+    clerkOrgId: orgData._id,
   });
 
   // Save agent configuration

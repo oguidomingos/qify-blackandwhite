@@ -6,7 +6,7 @@ export const getByOrg = query({
   handler: async (ctx, { orgId }) => {
     return await ctx.db
       .query("organization_settings")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q: any) => q.eq("orgId", orgId))
       .first();
   },
 });
@@ -23,7 +23,7 @@ export const upsert = mutation({
     
     const existing = await ctx.db
       .query("organization_settings")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q: any) => q.eq("orgId", orgId))
       .first();
 
     const now = Date.now();

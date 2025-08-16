@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { saveBusinessProfile, getBusinessProfileByOrg } from "@/lib/mock-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,7 +59,7 @@ export default function BusinessProfileStep({ onNext, orgData }: BusinessProfile
 
   // Get existing business profile
   const businessProfile = useQuery(api.businessProfiles.getByOrg, {
-    orgId: orgData._id,
+    clerkOrgId: orgData._id,
   });
 
   // Create or update business profile
@@ -120,7 +122,7 @@ export default function BusinessProfileStep({ onNext, orgData }: BusinessProfile
   const onSubmit = async (data: BusinessProfileForm) => {
     try {
       await saveBusinessProfile({
-        orgId: orgData._id,
+        clerkOrgId: orgData._id,
         businessName: data.businessName,
         niche: data.niche,
         services,

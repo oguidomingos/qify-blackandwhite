@@ -12,7 +12,7 @@ export const ingestWebhook = mutation({
     // Find WhatsApp account by instanceId
     const account = await ctx.db
       .query("whatsapp_accounts")
-      .withIndex("by_instance", (q) => q.eq("instanceId", instanceId))
+      .withIndex("by_instance", (q: any) => q.eq("instanceId", instanceId))
       .first();
 
     if (!account) {
@@ -37,7 +37,7 @@ export const ingestWebhook = mutation({
       // Check for idempotency
       const existingMessage = await ctx.db
         .query("messages")
-        .withIndex("by_provider_id", (q) => 
+        .withIndex("by_provider_id", (q: any) => 
           q.eq("providerMessageId", messageData.key.id)
         )
         .first();
@@ -88,7 +88,7 @@ async function upsertContact(ctx: any, orgId: any, messageData: any) {
   
   const existing = await ctx.db
     .query("contacts")
-    .withIndex("by_org_external", (q) => 
+    .withIndex("by_org_external", (q: any) => 
       q.eq("orgId", orgId).eq("externalId", phoneNumber)
     )
     .first();
@@ -115,7 +115,7 @@ async function upsertContact(ctx: any, orgId: any, messageData: any) {
 async function upsertSession(ctx: any, orgId: any, contactId: any) {
   const existing = await ctx.db
     .query("sessions")
-    .withIndex("by_org_contact", (q) => 
+    .withIndex("by_org_contact", (q: any) => 
       q.eq("orgId", orgId).eq("contactId", contactId)
     )
     .first();

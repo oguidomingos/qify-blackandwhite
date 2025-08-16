@@ -1,12 +1,12 @@
-import { v }: any from "convex/values";
-import { query, mutation }: any from "./_generated/server";
+import { v } from "convex/values";
+import { query, mutation } from "./_generated/server";
 
 export const getOrganization = query({
-  args: { clerkOrgId: v.string() }: any,
+  args: { clerkOrgId: v.string() },
   handler: async (ctx: any, { clerkOrgId }: any) => {
     return await ctx.db
       .query("organizations")
-      .withIndex("by_clerkOrgId", (q) => q.eq("clerkOrgId", clerkOrgId))
+      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
       .first();
   },
 });
@@ -20,7 +20,7 @@ export const createOrganization = mutation({
   handler: async (ctx: any, { name, clerkOrgId, billingPlan = "trial" }: any) => {
     const existing = await ctx.db
       .query("organizations")
-      .withIndex("by_clerkOrgId", (q) => q.eq("clerkOrgId", clerkOrgId))
+      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
       .first();
 
     if (existing) {
@@ -37,11 +37,11 @@ export const createOrganization = mutation({
 });
 
 export const getOrganizationByClerkId = query({
-  args: { clerkOrgId: v.string() }: any,
+  args: { clerkOrgId: v.string() },
   handler: async (ctx: any, { clerkOrgId }: any) => {
     return await ctx.db
       .query("organizations")
-      .withIndex("by_clerkOrgId", (q) => q.eq("clerkOrgId", clerkOrgId))
+      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
       .first();
   },
 });

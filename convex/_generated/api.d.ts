@@ -18,14 +18,12 @@ import type * as ai from "../ai.js";
 import type * as auth from "../auth.js";
 import type * as businessProfiles from "../businessProfiles.js";
 import type * as contacts from "../contacts.js";
-import type * as evolutionInstances from "../evolutionInstances.js";
 import type * as google from "../google.js";
 import type * as messages from "../messages.js";
 import type * as organizationSettings from "../organizationSettings.js";
 import type * as organizations from "../organizations.js";
 import type * as sessions from "../sessions.js";
 import type * as syncStatus from "../syncStatus.js";
-import type * as wa from "../wa.js";
 import type * as webhooks from "../webhooks.js";
 
 /**
@@ -42,14 +40,12 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   businessProfiles: typeof businessProfiles;
   contacts: typeof contacts;
-  evolutionInstances: typeof evolutionInstances;
   google: typeof google;
   messages: typeof messages;
   organizationSettings: typeof organizationSettings;
   organizations: typeof organizations;
   sessions: typeof sessions;
   syncStatus: typeof syncStatus;
-  wa: typeof wa;
   webhooks: typeof webhooks;
 }>;
 export declare const api: FilterApi<

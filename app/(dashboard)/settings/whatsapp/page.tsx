@@ -13,29 +13,167 @@ import {
   XCircle,
   AlertCircle
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useOrganization, useUser } from "@clerk/nextjs";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
 
 export default function WhatsAppSettings() {
+  const { organization } = useOrganization();
+  const { user } = useUser();
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("disconnected"); // disconnected, connecting, connected, error
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [instanceName, setInstanceName] = useState("");
+  
+  const orgId = organization?.id || user?.id;
+  
+  // Get agent configuration to get phone number
+  const agentConfig = useQuery(
+    api.agentConfigurations.getByOrg,
+    orgId ? { clerkOrgId: orgId } : "skip"
+  );
+  
+  useEffect(() => {
+    console.log('useEffect triggered, agentConfig:', agentConfig);
+    if (agentConfig?.phoneNumber) {
+      const generatedInstanceName = `qify-${agentConfig.phoneNumber.replace(/[^\d]/g, '')}`;
+      console.log('Generated instance name:', generatedInstanceName);
+      setInstanceName(generatedInstanceName);
+      
+      // Verificar status da instância ao carregar a página
+      checkExistingInstanceStatus(generatedInstanceName);
+    } else {
+      console.log('No agent config or phone number available');
+    }
+  }, [agentConfig]);
+
+  const checkExistingInstanceStatus = async (instanceName: string) => {
+    try {
+      console.log('Checking existing instance status for:', instanceName);
+      const statusResponse = await fetch(`/api/whatsapp/status/${instanceName}`);
+      
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        console.log('Existing instance status:', statusData);
+        
+        if (statusData.connected) {
+          setConnectionStatus("connected");
+          console.log('Instance already connected!');
+        } else {
+          setConnectionStatus("disconnected");
+          console.log('Instance exists but not connected');
+        }
+      } else {
+        console.log('Instance does not exist or API error');
+        setConnectionStatus("disconnected");
+      }
+    } catch (error) {
+      console.error('Error checking existing instance:', error);
+      setConnectionStatus("disconnected");
+    }
+  };
   
   const handleConnect = async () => {
+    if (!agentConfig?.phoneNumber) {
+      alert("Número de telefone não encontrado. Complete o onboarding primeiro.");
+      return;
+    }
+    
     setIsConnecting(true);
     setConnectionStatus("connecting");
     
-    // Simulate connection process
-    setTimeout(() => {
-      // In a real implementation, this would connect to Evolution API
-      setConnectionStatus("connected");
-      setQrCode("https://placehold.co/200x200/000000/FFFFFF/png?text=QR+Code");
+    try {
+      // Create WhatsApp instance using Evolution API MCP
+      const response = await fetch('/api/whatsapp/create-instance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          instanceName,
+          phoneNumber: agentConfig.phoneNumber,
+          orgId: orgId
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create instance');
+      }
+      
+      const data = await response.json();
+      
+      if (data.qrCode) {
+        setQrCode(data.qrCode);
+        setConnectionStatus("connecting");
+        
+        // Poll for connection status
+        const pollStatus = setInterval(async () => {
+          try {
+            console.log('Polling connection status...');
+            const statusResponse = await fetch(`/api/whatsapp/status/${instanceName}`);
+            const statusData = await statusResponse.json();
+            
+            console.log('Status response:', statusData);
+            
+            if (statusData.connected) {
+              console.log('WhatsApp connected! Stopping polling.');
+              setConnectionStatus("connected");
+              setQrCode(null);
+              clearInterval(pollStatus);
+            } else {
+              console.log(`Current status: ${statusData.status}`);
+            }
+          } catch (error) {
+            console.error('Error polling status:', error);
+          }
+        }, 3000);
+        
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+          console.log('Polling timeout reached');
+          clearInterval(pollStatus);
+          if (connectionStatus === "connecting") {
+            setConnectionStatus("error");
+          }
+        }, 120000);
+      }
+    } catch (error) {
+      console.error('Error connecting WhatsApp:', error);
+      setConnectionStatus("error");
+    } finally {
       setIsConnecting(false);
-    }, 2000);
+    }
   };
   
-  const handleDisconnect = () => {
-    setConnectionStatus("disconnected");
-    setQrCode(null);
+  const handleDisconnect = async () => {
+    try {
+      await fetch(`/api/whatsapp/disconnect/${instanceName}`, {
+        method: 'POST',
+      });
+      setConnectionStatus("disconnected");
+      setQrCode(null);
+    } catch (error) {
+      console.error('Error disconnecting:', error);
+    }
+  };
+
+  const handleConfigureWebhook = async () => {
+    try {
+      console.log('Configuring webhook for:', instanceName);
+      const response = await fetch(`/api/whatsapp/configure-webhook/${instanceName}`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        alert('Webhook configurado com sucesso!');
+      } else {
+        alert('Erro ao configurar webhook');
+      }
+    } catch (error) {
+      console.error('Error configuring webhook:', error);
+      alert('Erro ao configurar webhook');
+    }
   };
 
   return (
@@ -92,9 +230,14 @@ export default function WhatsAppSettings() {
             </div>
             <div className="flex gap-2">
               {connectionStatus === "connected" ? (
-                <Button variant="outline" onClick={handleDisconnect}>
-                  Desconectar
-                </Button>
+                <>
+                  <Button variant="outline" onClick={handleConfigureWebhook}>
+                    Configurar Webhook
+                  </Button>
+                  <Button variant="outline" onClick={handleDisconnect}>
+                    Desconectar
+                  </Button>
+                </>
               ) : (
                 <Button onClick={handleConnect} disabled={isConnecting}>
                   {isConnecting ? (

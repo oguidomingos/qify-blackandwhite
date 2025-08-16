@@ -1,14 +1,8 @@
 {
-  "project": "qify-sdr-agent",
-  "authInfo": [
-    {
-      "domain": "https://flowing-sawfish-84.clerk.accounts.dev",
-      "applicationID": "convex"
-    }
-  ],
-  "functions": "convex/",
-  "generateCommonJSApi": false,
   "node": {
-    "externalPackages": ["@node-rs/argon2", "@node-rs/bcrypt"]
+    "externalPackages": [
+      "@node-rs/argon2",
+      "@node-rs/bcrypt"
+    ]
   }
 }

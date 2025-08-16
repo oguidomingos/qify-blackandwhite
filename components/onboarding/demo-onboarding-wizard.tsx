@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useOrganization } from "@clerk/nextjs";
+import { useOrganization, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { 
   Building, 
   Calendar, 
@@ -79,6 +81,7 @@ const PERSONALITIES = [
 
 export default function DemoOnboardingWizard() {
   const { organization } = useOrganization();
+  const { user } = useUser();
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
@@ -87,24 +90,97 @@ export default function DemoOnboardingWizard() {
     businessName: "",
     niche: "",
     businessDescription: "",
+    targetAudience: "",
+    services: "",
+    website: "",
     agentName: "",
     personality: "professional",
+    phoneNumber: "",
   });
+
+  // Convex mutations
+  const createBusinessProfile = useMutation(api.businessProfiles.upsert);
+  const createAgentConfig = useMutation(api.agentConfigurations.upsert);
 
   const progress = ((currentStep + 1) / ONBOARDING_STEPS.length) * 100;
 
   const saveStepData = async (stepId: string) => {
     setIsSaving(true);
     
-    // In a real implementation, this would save to Convex
-    // For now, we'll simulate an API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        console.log(`Saving data for step: ${stepId}`, formData);
-        setIsSaving(false);
-        resolve(true);
-      }, 1000);
-    });
+    try {
+      const orgId = organization?.id || user?.id;
+      if (!orgId) {
+        throw new Error("No organization ID found");
+      }
+
+      switch (stepId) {
+        case "business":
+          await createBusinessProfile({
+            clerkOrgId: orgId,
+            businessName: formData.businessName,
+            niche: formData.niche,
+            services: formData.services.split(',').map(s => s.trim()).filter(s => s),
+            targetAudience: formData.targetAudience,
+            businessDescription: formData.businessDescription,
+            website: formData.website || undefined,
+          });
+          break;
+
+        case "agent":
+          await createAgentConfig({
+            clerkOrgId: orgId,
+            agentName: formData.agentName,
+            phoneNumber: "", // Will be set in WhatsApp step
+            personality: formData.personality,
+            toneOfVoice: formData.personality === "professional" ? "Formal e objetivo" : 
+                         formData.personality === "friendly" ? "Caloroso e empático" :
+                         formData.personality === "energetic" ? "Entusiasmado e dinâmico" :
+                         "Analítico e questionador",
+            language: "pt-BR",
+            responseTime: 2,
+            workingHours: {
+              start: "09:00",
+              end: "18:00",
+              timezone: "America/Sao_Paulo",
+              workDays: ["mon", "tue", "wed", "thu", "fri"]
+            }
+          });
+          break;
+
+        case "google":
+          // Google step doesn't save form data directly
+          break;
+          
+        case "whatsapp":
+          // Update agent config with phone number
+          await createAgentConfig({
+            clerkOrgId: orgId,
+            agentName: formData.agentName,
+            phoneNumber: formData.phoneNumber,
+            personality: formData.personality,
+            toneOfVoice: formData.personality === "professional" ? "Formal e objetivo" : 
+                         formData.personality === "friendly" ? "Caloroso e empático" :
+                         formData.personality === "energetic" ? "Entusiasmado e dinâmico" :
+                         "Analítico e questionador",
+            language: "pt-BR",
+            responseTime: 2,
+            workingHours: {
+              start: "09:00",
+              end: "18:00",
+              timezone: "America/Sao_Paulo",
+              workDays: ["mon", "tue", "wed", "thu", "fri"]
+            }
+          });
+          break;
+      }
+      
+      console.log(`Saved data for step: ${stepId}`);
+    } catch (error) {
+      console.error(`Error saving step ${stepId}:`, error);
+      throw error;
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleNext = async () => {
@@ -164,6 +240,28 @@ export default function DemoOnboardingWizard() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="services" className="text-white">Serviços (separados por vírgula)</Label>
+              <Input
+                id="services"
+                value={formData.services}
+                onChange={(e) => setFormData({...formData, services: e.target.value})}
+                placeholder="Ex: Desenvolvimento de Software, Consultoria, Suporte"
+                className="glass"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="targetAudience" className="text-white">Público-alvo</Label>
+              <Input
+                id="targetAudience"
+                value={formData.targetAudience}
+                onChange={(e) => setFormData({...formData, targetAudience: e.target.value})}
+                placeholder="Ex: Empresas médias do setor industrial"
+                className="glass"
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="businessDescription" className="text-white">Descrição do Negócio</Label>
               <Textarea
                 id="businessDescription"
@@ -171,6 +269,17 @@ export default function DemoOnboardingWizard() {
                 onChange={(e) => setFormData({...formData, businessDescription: e.target.value})}
                 placeholder="Descreva seu negócio, diferenciais e como ajuda seus clientes"
                 className="glass min-h-[120px]"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="website" className="text-white">Website (opcional)</Label>
+              <Input
+                id="website"
+                value={formData.website}
+                onChange={(e) => setFormData({...formData, website: e.target.value})}
+                placeholder="Ex: https://www.techsolutions.com.br"
+                className="glass"
               />
             </div>
           </div>
@@ -191,12 +300,8 @@ export default function DemoOnboardingWizard() {
             <Button 
               className="glass-hover"
               onClick={() => {
-                // In a real implementation, this would initiate Google OAuth flow
-                console.log("Initiating Google Calendar connection");
-                // Mark step as completed for demo purposes
-                if (!completedSteps.includes("google")) {
-                  setCompletedSteps([...completedSteps, "google"]);
-                }
+                // Redirect to Google OAuth flow
+                window.location.href = "/api/oauth/google/start";
               }}
             >
               Conectar Google Calendar
@@ -258,21 +363,45 @@ export default function DemoOnboardingWizard() {
 
       case 3: // WhatsApp Setup
         return (
-          <div className="space-y-6 text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-green-500/10 flex items-center justify-center">
-              <MessageCircle className="w-8 h-8 text-green-400" />
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-white mb-2">WhatsApp Setup</h3>
-              <p className="text-slate-300">
-                Configure sua conexão WhatsApp via Evolution API
-              </p>
+          <div className="space-y-6">
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto rounded-full bg-green-500/10 flex items-center justify-center">
+                <MessageCircle className="w-8 h-8 text-green-400" />
+              </div>
+              <div className="mt-4">
+                <h3 className="text-xl font-bold text-white mb-2">WhatsApp Setup</h3>
+                <p className="text-slate-300">
+                  Configure sua conexão WhatsApp via Evolution API
+                </p>
+              </div>
             </div>
             
             <div className="space-y-4">
+              <div>
+                <Label htmlFor="phoneNumber" className="text-white">
+                  Número do WhatsApp *
+                </Label>
+                <Input
+                  id="phoneNumber"
+                  type="tel"
+                  placeholder="+5511999999999"
+                  value={formData.phoneNumber}
+                  onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                  className="bg-slate-800/50 border-slate-600 text-white"
+                  required
+                />
+                <p className="text-slate-400 text-sm mt-1">
+                  Digite o número completo com código do país (ex: +5511999999999)
+                </p>
+              </div>
+              
               <div className="p-4 rounded-lg bg-slate-800/30 border border-slate-700">
                 <h4 className="text-white font-medium mb-2">Próximos Passos:</h4>
                 <div className="space-y-2 text-sm text-slate-300">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-primary"></div>
+                    <span>Salvar número do WhatsApp</span>
+                  </div>
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 rounded-full bg-primary"></div>
                     <span>Criar instância Evolution API</span>
@@ -281,25 +410,30 @@ export default function DemoOnboardingWizard() {
                     <div className="w-2 h-2 rounded-full bg-primary"></div>
                     <span>Gerar QR Code para autenticação</span>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-primary"></div>
-                    <span>Sincronizar conversas existentes</span>
-                  </div>
                 </div>
               </div>
               
               <Button 
-                className="glass-hover"
-                onClick={() => {
-                  // In a real implementation, this would initiate WhatsApp connection
-                  console.log("Initiating WhatsApp connection");
-                  // Mark step as completed for demo purposes
-                  if (!completedSteps.includes("whatsapp")) {
-                    setCompletedSteps([...completedSteps, "whatsapp"]);
+                className="glass-hover w-full"
+                disabled={!formData.phoneNumber.trim() || isSaving}
+                onClick={async () => {
+                  if (!formData.phoneNumber.trim()) {
+                    alert("Por favor, digite o número do WhatsApp");
+                    return;
+                  }
+                  
+                  try {
+                    await saveStepData("whatsapp");
+                    if (!completedSteps.includes("whatsapp")) {
+                      setCompletedSteps([...completedSteps, "whatsapp"]);
+                    }
+                  } catch (error) {
+                    console.error("Error saving WhatsApp config:", error);
+                    alert("Erro ao salvar configuração. Tente novamente.");
                   }
                 }}
               >
-                Configurar WhatsApp
+                {isSaving ? "Salvando..." : "Configurar WhatsApp"}
               </Button>
             </div>
           </div>

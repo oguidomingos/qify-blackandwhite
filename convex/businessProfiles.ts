@@ -2,18 +2,29 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
 export const getByOrg = query({
-  args: { orgId: v.id("organizations") },
-  handler: async (ctx, { orgId }) => {
+  args: { clerkOrgId: v.string() },
+  handler: async (ctx, { clerkOrgId }) => {
+    // First find the organization by Clerk ID
+    const organization = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+      .first();
+    
+    if (!organization) {
+      return null;
+    }
+
+    // Then find the business profile using the internal org ID
     return await ctx.db
       .query("business_profiles")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q: any) => q.eq("orgId", organization._id))
       .first();
   },
 });
 
 export const upsert = mutation({
   args: {
-    orgId: v.id("organizations"),
+    clerkOrgId: v.string(),
     businessName: v.string(),
     niche: v.string(),
     services: v.array(v.string()),
@@ -24,11 +35,34 @@ export const upsert = mutation({
     materials: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    const { orgId, ...data } = args;
+    const { clerkOrgId, ...data } = args;
     
+    // First find the organization by Clerk ID
+    let organization = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+      .first();
+    
+    // Create organization if it doesn't exist
+    if (!organization) {
+      const organizationId = await ctx.db.insert("organizations", {
+        name: data.businessName || "Nova Empresa",
+        clerkOrgId,
+        billingPlan: "starter",
+        onboardingStep: "business",
+        onboardingCompleted: false,
+        createdAt: Date.now(),
+      });
+      
+      organization = await ctx.db.get(organizationId);
+      if (!organization) {
+        throw new Error("Failed to create organization");
+      }
+    }
+
     const existing = await ctx.db
       .query("business_profiles")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q: any) => q.eq("orgId", organization._id))
       .first();
 
     const now = Date.now();
@@ -40,11 +74,17 @@ export const upsert = mutation({
       });
     } else {
       return await ctx.db.insert("business_profiles", {
-        orgId,
+        orgId: organization._id,
         ...data,
         createdAt: now,
         updatedAt: now,
       });
     }
+  },
+});
+
+export const listAll = query({
+  handler: async (ctx: any) => {
+    return await ctx.db.query("business_profiles").collect();
   },
 });

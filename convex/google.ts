@@ -1,5 +1,5 @@
-import { v }: any from "convex/values";
-import { mutation, query, action }: any from "./_generated/server";
+import { v } from "convex/values";
+import { mutation, query, action } from "./_generated/server";
 
 export const saveCredentials = mutation({
   args: {
@@ -24,17 +24,17 @@ export const saveCredentials = mutation({
 });
 
 export const getCredentials = query({
-  args: { orgId: v.id("organizations") }: any,
+  args: { orgId: v.id("organizations") },
   handler: async (ctx: any, { orgId }: any) => {
     return await ctx.db
       .query("google_credentials")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q: any) => q.eq("orgId", orgId))
       .first();
   },
 });
 
 export const refreshAccessToken = action({
-  args: { credentialId: v.id("google_credentials") }: any,
+  args: { credentialId: v.id("google_credentials") },
   handler: async (ctx: any, { credentialId }: any) => {
     const credentials = await ctx.runQuery("google_credentials", "get", {
       id: credentialId,
@@ -112,11 +112,11 @@ export const createCalendarEvent = action({
         dateTime: args.endTime,
         timeZone: "America/Sao_Paulo",
       },
-      attendees: args.attendeeEmail ? [{ email: args.attendeeEmail }: any] : [],
+      attendees: args.attendeeEmail ? [{ email: args.attendeeEmail }] : [],
       conferenceData: {
         createRequest: {
           requestId: `meet-${Date.now()}`,
-          conferenceSolutionKey: { type: "hangoutsMeet" }: any,
+          conferenceSolutionKey: { type: "hangoutsMeet" },
         },
       },
     };

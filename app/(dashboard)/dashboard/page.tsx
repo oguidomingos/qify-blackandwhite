@@ -3,6 +3,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Users, Bot, TrendingUp, Clock, CheckCircle } from "lucide-react";
+import { useOrganization, useUser } from "@clerk/nextjs";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
 
 const stats = [
   {
@@ -56,6 +59,49 @@ const pendingContacts = [
 ];
 
 export default function DashboardPage() {
+  const { organization } = useOrganization();
+  const { user } = useUser();
+  const orgId = organization?.id || user?.id;
+
+  // Get real data from Convex
+  const businessProfile = useQuery(
+    api.businessProfiles.getByOrg,
+    orgId ? { clerkOrgId: orgId } : "skip"
+  );
+
+  const agentConfig = useQuery(
+    api.agentConfigurations.getByOrg,
+    orgId ? { clerkOrgId: orgId } : "skip"
+  );
+
+  // TODO: Add queries for real message and contact data when those schemas are implemented
+  const realStats = [
+    {
+      title: "Mensagens Hoje",
+      value: "0", // Will be real data from messages table
+      description: "Nenhuma mensagem ainda",
+      icon: MessageSquare,
+    },
+    {
+      title: "Contatos Ativos",
+      value: "0", // Will be real data from contacts table
+      description: "Aguardando primeiros contatos",
+      icon: Users,
+    },
+    {
+      title: "Agente Configurado",
+      value: agentConfig ? "✓" : "✗",
+      description: agentConfig ? `${agentConfig.agentName}` : "Configure seu agente",
+      icon: Bot,
+    },
+    {
+      title: "Negócio Configurado",
+      value: businessProfile ? "✓" : "✗", 
+      description: businessProfile ? `${businessProfile.businessName}` : "Configure seu negócio",
+      icon: TrendingUp,
+    },
+  ];
+
   return (
     <div className="flex-1 space-y-6 p-8">
       {/* Header */}
@@ -63,6 +109,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground">
+            {businessProfile ? `${businessProfile.businessName} - ` : ""}
             Visão geral do seu agente SDR
           </p>
         </div>
@@ -74,7 +121,7 @@ export default function DashboardPage() {
 
       {/* Stats Cards */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => {
+        {realStats.map((stat) => {
           const Icon = stat.icon;
           return (
             <Card key={stat.title} className="glass glass-hover">
@@ -108,32 +155,19 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {pendingContacts.map((contact) => (
-              <div
-                key={contact.id}
-                className="flex items-center justify-between p-3 glass rounded-lg glass-hover cursor-pointer"
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Users className="w-4 h-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">{contact.name}</p>
-                    <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                      <span>{contact.platform}</span>
-                      <span>•</span>
-                      <span>{contact.messages} mensagens</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {contact.lastMessage}
-                </div>
-              </div>
-            ))}
-            <Button variant="outline" className="w-full glass-hover">
-              Ver todos os contatos
-            </Button>
+            {/* TODO: Replace with real contacts data when available */}
+            <div className="text-center py-8">
+              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                Nenhum contato pendente
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                {agentConfig?.phoneNumber 
+                  ? "Conecte seu WhatsApp nas configurações para receber mensagens"
+                  : "Complete a configuração do agente primeiro"
+                }
+              </p>
+            </div>
           </CardContent>
         </Card>
 
@@ -149,43 +183,15 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center space-x-3">
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                <div className="flex-1">
-                  <p className="text-sm text-foreground">
-                    Mensagem enviada para Sarah Chen
-                  </p>
-                  <p className="text-xs text-muted-foreground">2 min atrás</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                <div className="flex-1">
-                  <p className="text-sm text-foreground">
-                    Nova mensagem recebida de Marcus Silva
-                  </p>
-                  <p className="text-xs text-muted-foreground">5 min atrás</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-2 h-2 rounded-full bg-primary"></div>
-                <div className="flex-1">
-                  <p className="text-sm text-foreground">
-                    IA processou 3 conversas
-                  </p>
-                  <p className="text-xs text-muted-foreground">12 min atrás</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                <div className="flex-1">
-                  <p className="text-sm text-foreground">
-                    Lead qualificado: Ana Costa
-                  </p>
-                  <p className="text-xs text-muted-foreground">1h atrás</p>
-                </div>
-              </div>
+            {/* TODO: Replace with real activity data when available */}
+            <div className="text-center py-8">
+              <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                Nenhuma atividade recente
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                As atividades do sistema aparecerão aqui
+              </p>
             </div>
           </CardContent>
         </Card>

@@ -7,7 +7,7 @@ export const getByOrg = query({
     syncType: v.optional(v.string()),
   },
   handler: async (ctx, { orgId, syncType }) => {
-    let q = ctx.db.query("sync_status").withIndex("by_org_type", (q) => q.eq("orgId", orgId));
+    let q = ctx.db.query("sync_status").withIndex("by_org_type", (q: any) => q.eq("orgId", orgId));
     
     if (syncType) {
       q = q.filter((q) => q.eq(q.field("syncType"), syncType));

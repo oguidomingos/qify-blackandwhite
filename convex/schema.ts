@@ -1,5 +1,5 @@
-import { defineSchema, defineTable }: any from "convex/server";
-import { v }: any from "convex/values";
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
 
 export default defineSchema({
   organizations: defineTable({
