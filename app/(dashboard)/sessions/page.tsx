@@ -5,54 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Users, MessageSquare, TrendingUp, Calendar, Clock, Target } from "lucide-react";
-
-const sessions = [
-  {
-    id: "1",
-    contact: "Sarah Chen",
-    stage: "implication",
-    score: 75,
-    status: "active",
-    lastActivity: "2 min atrás",
-    messages: 8,
-    variables: {
-      situation: { completed: true, answers: ["Empresa de tecnologia", "50 funcionários"] },
-      problem: { completed: true, answers: ["Dificuldade com vendas", "Processo manual"] },
-      implication: { completed: false, answers: ["Perda de clientes"] },
-      needPayoff: { completed: false, answers: [] },
-    }
-  },
-  {
-    id: "2", 
-    contact: "Marcus Silva",
-    stage: "problem",
-    score: 45,
-    status: "active",
-    lastActivity: "5 min atrás",
-    messages: 4,
-    variables: {
-      situation: { completed: true, answers: ["Startup", "10 funcionários"] },
-      problem: { completed: false, answers: ["Falta de automação"] },
-      implication: { completed: false, answers: [] },
-      needPayoff: { completed: false, answers: [] },
-    }
-  },
-  {
-    id: "3",
-    contact: "Ana Costa",
-    stage: "qualified",
-    score: 90,
-    status: "scheduled",
-    lastActivity: "1h atrás",
-    messages: 12,
-    variables: {
-      situation: { completed: true, answers: ["E-commerce", "100 funcionários"] },
-      problem: { completed: true, answers: ["Sistema lento", "Alto custo"] },
-      implication: { completed: true, answers: ["Perda de 30% nas vendas", "Clientes insatisfeitos"] },
-      needPayoff: { completed: true, answers: ["Solução integrada", "ROI em 6 meses"] },
-    }
-  },
-];
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useOrganization, useUser } from "@clerk/nextjs";
 
 const getStageColor = (stage: string) => {
   switch (stage) {
@@ -105,6 +60,83 @@ const getStatusBadge = (status: string) => {
 };
 
 export default function SessionsPage() {
+  const { organization } = useOrganization();
+  const { user } = useUser();
+
+  // Use organization ID or user ID as fallback
+  const orgId = organization?.id || user?.id;
+
+  // Get organization from Convex
+  const convexOrg = useQuery(api.organizations.getByClerkId, 
+    orgId ? { clerkId: orgId } : "skip"
+  );
+
+  // Load real data from Convex
+  const sessionsData = useQuery(api.sessions.listByOrg, 
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  const contacts = useQuery(api.contacts.listByOrg, 
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  const recentMessages = useQuery(api.messages.listByOrgRecent,
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  // Transform sessions data for display
+  const sessions = sessionsData?.map(session => {
+    const contact = contacts?.find(c => c._id === session.contactId);
+    const sessionMessages = recentMessages?.filter(msg => msg.sessionId === session._id);
+    
+    // Calculate SPIN score based on variables
+    const spinData = session.variables.spin;
+    let score = 0;
+    if (spinData) {
+      score = spinData.score || 0;
+    }
+
+    // Format time ago
+    function formatTimeAgo(timestamp: number) {
+      const now = Date.now();
+      const diff = now - timestamp;
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
+
+      if (minutes < 1) return "Agora";
+      if (minutes < 60) return `${minutes} min atrás`;
+      if (hours < 24) return `${hours}h atrás`;
+      return `${days}d atrás`;
+    }
+
+    return {
+      id: session._id,
+      contact: contact?.name || "Contato sem nome",
+      stage: spinData?.stage || session.stage || "situation",
+      score: score,
+      status: session.status,
+      lastActivity: formatTimeAgo(session.lastActivityAt),
+      messages: sessionMessages?.length || 0,
+      variables: {
+        situation: spinData?.situation || { completed: false, answers: [] },
+        problem: spinData?.problem || { completed: false, answers: [] },
+        implication: spinData?.implication || { completed: false, answers: [] },
+        needPayoff: spinData?.needPayoff || { completed: false, answers: [] },
+      }
+    };
+  }) || [];
+
+  // Calculate statistics
+  const activeSessions = sessions.filter(s => s.status === "active").length;
+  const averageScore = sessions.length > 0 
+    ? Math.round(sessions.reduce((sum, s) => sum + s.score, 0) / sessions.length) 
+    : 0;
+  const qualifiedSessions = sessions.filter(s => s.status === "scheduled" || s.stage === "qualified").length;
+  const conversionRate = sessions.length > 0 
+    ? Math.round((qualifiedSessions / sessions.length) * 100) 
+    : 0;
+
   return (
     <div className="flex-1 space-y-6 p-8">
       {/* Header */}
@@ -129,9 +161,9 @@ export default function SessionsPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">{activeSessions}</div>
             <p className="text-xs text-muted-foreground">
-              +2 desde ontem
+              {sessions.length > 0 ? `${sessions.length} total` : "Nenhuma sessão"}
             </p>
           </CardContent>
         </Card>
@@ -142,9 +174,9 @@ export default function SessionsPage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">70</div>
+            <div className="text-2xl font-bold">{averageScore}</div>
             <p className="text-xs text-muted-foreground">
-              ↗️ +15 pontos
+              {sessions.length > 0 ? "pontos SPIN" : "Sem dados"}
             </p>
           </CardContent>
         </Card>
@@ -155,7 +187,7 @@ export default function SessionsPage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1</div>
+            <div className="text-2xl font-bold">{qualifiedSessions}</div>
             <p className="text-xs text-muted-foreground">
               Pronto para agendamento
             </p>
@@ -168,9 +200,9 @@ export default function SessionsPage() {
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">33%</div>
+            <div className="text-2xl font-bold">{conversionRate}%</div>
             <p className="text-xs text-muted-foreground">
-              1/3 qualificados
+              {qualifiedSessions}/{sessions.length} qualificados
             </p>
           </CardContent>
         </Card>
@@ -179,6 +211,28 @@ export default function SessionsPage() {
       {/* Sessions List */}
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground">Sessões em Andamento</h2>
+        
+        {!convexOrg && (
+          <Card className="glass">
+            <CardContent className="p-8 text-center">
+              <div className="animate-pulse text-muted-foreground">
+                Carregando sessões...
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {convexOrg && sessions.length === 0 && (
+          <Card className="glass">
+            <CardContent className="p-8 text-center text-muted-foreground">
+              <Target className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <h3 className="text-lg font-medium mb-2">Nenhuma sessão ativa</h3>
+              <p className="text-sm">
+                As conversas aparecerão aqui quando iniciadas pelos prospects
+              </p>
+            </CardContent>
+          </Card>
+        )}
         
         {sessions.map((session) => (
           <Card key={session.id} className="glass glass-hover">

@@ -5,38 +5,72 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MessageSquare, Mic, Check, Edit, Users, Clock } from "lucide-react";
-
-const pendingContacts = [
-  {
-    id: "1",
-    name: "Sarah Chen",
-    platform: "whatsapp",
-    messages: 2,
-    lastMessage: "Gostaria de saber mais sobre seus serviços",
-    time: "2 min",
-  },
-  {
-    id: "2",
-    name: "Marcus Silva", 
-    platform: "whatsapp",
-    messages: 1,
-    lastMessage: "Qual o preço do seu produto?",
-    time: "5 min",
-  },
-  {
-    id: "3",
-    name: "Ana Costa",
-    platform: "telegram",
-    messages: 3,
-    lastMessage: "Preciso de uma solução urgente",
-    time: "12 min",
-  },
-];
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useOrganization, useUser } from "@clerk/nextjs";
 
 export default function InboxPage() {
+  const { organization } = useOrganization();
+  const { user } = useUser();
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // Use organization ID or user ID as fallback
+  const orgId = organization?.id || user?.id;
+
+  // Get organization from Convex
+  const convexOrg = useQuery(api.organizations.getByClerkId, 
+    orgId ? { clerkId: orgId } : "skip"
+  );
+
+  // Load real data from Convex
+  const contacts = useQuery(api.contacts.listByOrg, 
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  const recentMessages = useQuery(api.messages.listByOrgRecent,
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  const activeSessions = useQuery(api.sessions.listByOrg,
+    convexOrg ? { orgId: convexOrg._id } : "skip"
+  );
+
+  // Transform contacts data for display
+  const pendingContacts = contacts?.filter(contact => {
+    // Find if contact has recent activity
+    const hasRecentMessages = recentMessages?.some(msg => msg.contactId === contact._id);
+    return hasRecentMessages;
+  }).map(contact => {
+    // Get latest message for this contact
+    const latestMessage = recentMessages?.find(msg => msg.contactId === contact._id && msg.direction === "inbound");
+    const messageCount = recentMessages?.filter(msg => msg.contactId === contact._id).length || 0;
+    
+    return {
+      id: contact._id,
+      name: contact.name || "Contato sem nome",
+      platform: contact.channel || "whatsapp",
+      messages: messageCount,
+      lastMessage: latestMessage?.text || "Sem mensagens",
+      time: latestMessage ? formatTimeAgo(latestMessage.createdAt) : "Agora",
+      contact: contact
+    };
+  }) || [];
+
+  // Helper function to format time ago
+  function formatTimeAgo(timestamp: number) {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return "Agora";
+    if (minutes < 60) return `${minutes} min`;
+    if (hours < 24) return `${hours}h`;
+    return `${days}d`;
+  }
 
   const handleContactClick = (contactId: string, contactName: string) => {
     setSelectedContact(contactName);
@@ -154,6 +188,16 @@ export default function InboxPage() {
           </div>
 
           <div className="space-y-3">
+            {!convexOrg && (
+              <div className="text-center p-4 text-muted-foreground">
+                <div className="animate-pulse">Carregando contatos...</div>
+              </div>
+            )}
+            {convexOrg && pendingContacts.length === 0 && (
+              <div className="text-center p-4 text-muted-foreground">
+                Nenhum contato pendente
+              </div>
+            )}
             {pendingContacts.map((contact) => (
               <div
                 key={contact.id}
@@ -234,15 +278,15 @@ export default function InboxPage() {
             <CardContent className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Mensagens hoje</span>
-                <span className="text-foreground">12</span>
+                <span className="text-foreground">{recentMessages?.length || 0}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tempo de resposta médio</span>
-                <span className="text-foreground">2.3s</span>
+                <span className="text-muted-foreground">Contatos ativos</span>
+                <span className="text-foreground">{pendingContacts.length}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Taxa de aprovação</span>
-                <span className="text-foreground">94%</span>
+                <span className="text-muted-foreground">Sessões ativas</span>
+                <span className="text-foreground">{activeSessions?.length || 0}</span>
               </div>
             </CardContent>
           </Card>

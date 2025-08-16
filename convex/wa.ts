@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalAction, internalQuery } from "./_generated/server";
+import { action, internalAction, internalQuery, mutation, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 export const sendMessage = internalAction({
@@ -13,11 +13,17 @@ export const sendMessage = internalAction({
     })),
   },
   handler: async (ctx: any, { orgId, to, text, media }: any) => {
-    // Get WhatsApp account for this org
-    const account = await ctx.runQuery(internal.wa.queryAccountByOrg, { orgId });
+    // Get WhatsApp account for this org, create if doesn't exist
+    let account = await ctx.runQuery(internal.wa.queryAccountByOrg, { orgId });
     
     if (!account) {
-      throw new Error("No WhatsApp account found for organization");
+      console.log("No WhatsApp account found, creating one for org:", orgId);
+      await ctx.runMutation(internal.wa.ensureAccountExists, { orgId });
+      account = await ctx.runQuery(internal.wa.queryAccountByOrg, { orgId });
+      
+      if (!account) {
+        throw new Error("Failed to create WhatsApp account for organization");
+      }
     }
 
     // Clean phone number and ensure correct format
@@ -70,5 +76,75 @@ export const queryAccountByOrg = internalQuery({
       .query("whatsapp_accounts")
       .withIndex("by_org", (q: any) => q.eq("orgId", orgId))
       .first();
+  },
+});
+
+export const createAccount = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    instanceId: v.string(),
+    phoneNumber: v.string(),
+    baseUrl: v.optional(v.string()),
+    token: v.optional(v.string()),
+  },
+  handler: async (ctx: any, { orgId, instanceId, phoneNumber, baseUrl, token }: any) => {
+    // Check if account already exists
+    const existing = await ctx.db
+      .query("whatsapp_accounts")
+      .withIndex("by_org", (q: any) => q.eq("orgId", orgId))
+      .first();
+
+    if (existing) {
+      return existing._id;
+    }
+
+    // Create new account
+    return await ctx.db.insert("whatsapp_accounts", {
+      orgId,
+      provider: "evolution",
+      instanceId,
+      phoneNumber,
+      webhookSecret: "",
+      sharedToken: token || process.env.EVOLUTION_API_TOKEN || "",
+      baseUrl: baseUrl || process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+      token: token || process.env.EVOLUTION_API_TOKEN || "",
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const ensureAccountExists = internalMutation({
+  args: { orgId: v.id("organizations") },
+  handler: async (ctx: any, { orgId }: any) => {
+    // Check if account already exists
+    const existing = await ctx.db
+      .query("whatsapp_accounts")
+      .withIndex("by_org", (q: any) => q.eq("orgId", orgId))
+      .first();
+
+    if (existing) {
+      return existing._id;
+    }
+
+    // Create default account - we'll use the org phone number from agent config
+    const agentConfig = await ctx.db
+      .query("agent_configurations") 
+      .filter((q: any) => q.eq(q.field("orgId"), orgId))
+      .first();
+
+    const phoneNumber = agentConfig?.phoneNumber || "5561999449983"; // fallback
+    const instanceId = `qify-${phoneNumber}`;
+
+    return await ctx.db.insert("whatsapp_accounts", {
+      orgId,
+      provider: "evolution",
+      instanceId,
+      phoneNumber,
+      webhookSecret: "",
+      sharedToken: process.env.EVOLUTION_API_TOKEN || "",
+      baseUrl: process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+      token: process.env.EVOLUTION_API_TOKEN || "",
+      createdAt: Date.now(),
+    });
   },
 });

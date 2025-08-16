@@ -10,8 +10,6 @@ import {
   MessageSquare,
   Users,
   Settings,
-  MessageCircle,
-  Bot,
   Calendar,
 } from "lucide-react";
 
@@ -30,16 +28,6 @@ const navigation = [
     name: "Sessions",
     href: "/sessions",
     icon: Users,
-  },
-  {
-    name: "WhatsApp",
-    href: "/settings/whatsapp",
-    icon: MessageCircle,
-  },
-  {
-    name: "AI Settings",
-    href: "/settings/ai",
-    icon: Bot,
   },
   {
     name: "Calendar",
