@@ -15,6 +15,7 @@ import type {
 } from "convex/server";
 import type * as agentConfigurations from "../agentConfigurations.js";
 import type * as ai from "../ai.js";
+import type * as aiConfigurations from "../aiConfigurations.js";
 import type * as aiPrompts from "../aiPrompts.js";
 import type * as auth from "../auth.js";
 import type * as businessProfiles from "../businessProfiles.js";
@@ -38,6 +39,7 @@ import type * as wa from "../wa.js";
 declare const fullApi: ApiFromModules<{
   agentConfigurations: typeof agentConfigurations;
   ai: typeof ai;
+  aiConfigurations: typeof aiConfigurations;
   aiPrompts: typeof aiPrompts;
   auth: typeof auth;
   businessProfiles: typeof businessProfiles;

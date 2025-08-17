@@ -19,9 +19,18 @@ export const generateAiReply = action({
         return { skipped: true, reason: "batching_or_cooldown" };
       }
 
-      // Wait for potential additional messages (batching delay)
-      console.log('Waiting 3 seconds for message batching...');
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Get AI configurations for dynamic batching settings
+      const aiConfig = await ctx.runQuery("aiConfigurations:getByOrg", {
+        orgId
+      });
+      
+      console.log(`AI Config for orgId ${orgId}:`, aiConfig);
+      
+      const batchingDelay = aiConfig?.batchingDelayMs || 3000;
+      
+      // Wait for potential additional messages (dynamic batching delay)
+      console.log(`Waiting ${batchingDelay/1000} seconds for message batching...`);
+      await new Promise(resolve => setTimeout(resolve, batchingDelay));
 
       // Get session data
       const session = await ctx.runQuery(internal.sessions.getById, { sessionId });
@@ -29,10 +38,11 @@ export const generateAiReply = action({
         throw new Error("Session not found");
       }
 
-      // Get ALL messages for better context (increased from 10 to 20)
+      // Get messages for context (dynamic limit from config)
+      const maxMessages = aiConfig?.maxMessagesContext || 20;
       const messagesDesc = await ctx.runQuery(internal.messages.listBySession, { 
         sessionId,
-        limit: 20,
+        limit: maxMessages,
       });
 
       // Reverse to chronological order for proper context building

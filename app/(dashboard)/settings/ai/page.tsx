@@ -5,30 +5,50 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Bot, Save, Settings } from "lucide-react";
+import { Bot, Save, Settings, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { useOrganization } from "@clerk/nextjs";
+import { useOrganization, useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
 
 export default function AISettings() {
   const { organization } = useOrganization();
+  const { user } = useUser();
   const [loading, setSaving] = useState(false);
   
-  // Get agent configuration
+  // Use organization ID or user ID as fallback
+  const clerkOrgId = organization?.id || user?.id;
+  
+  console.log('Organization from useOrganization:', organization);
+  console.log('User from useUser:', user);
+  console.log('Final clerkOrgId:', clerkOrgId);
+  
+  // Get agent configuration using Clerk ID
   const agentConfig = useQuery(api.agentConfigurations.getByOrg, 
-    organization?.id ? { clerkOrgId: organization.id } : "skip"
+    clerkOrgId ? { clerkOrgId } : "skip"
   );
+  
+  // Use the internal org ID from agent config for AI configurations
+  const internalOrgId = agentConfig?.orgId;
+  
+  console.log('Agent config found:', agentConfig);
+  console.log('Internal orgId:', internalOrgId);
   
   // Get active prompt
   const activePrompt = useQuery(api.aiPrompts.getActivePrompt,
     agentConfig ? { orgId: agentConfig.orgId } : "skip"
   );
   
+  // Get AI configurations (batching settings) using internal org ID
+  const aiConfig = useQuery(api.aiConfigurations.getByOrg,
+    internalOrgId ? { orgId: internalOrgId } : "skip"
+  );
+  
   // Mutations
   const updateAgentSettings = useMutation(api.agentConfigurations.updateSettings);
   const createOrUpdatePrompt = useMutation(api.aiPrompts.createOrUpdatePrompt);
+  const updateAiConfig = useMutation(api.aiConfigurations.upsert);
   
   // State
   const [prompt, setPrompt] = useState(`Você é um SDR (Sales Development Representative) especialista na metodologia SPIN.
@@ -63,6 +83,12 @@ Lembre-se: Seu objetivo é descobrir se existe fit e agendar uma conversa com no
   const [responseDelay, setResponseDelay] = useState(2);
   const [personality, setPersonality] = useState("professional");
   const [language, setLanguage] = useState("pt-br");
+  
+  // Batching configurations
+  const [batchingDelay, setBatchingDelay] = useState(3); // seconds
+  const [cooldownTime, setCooldownTime] = useState(5); // seconds
+  const [processingTimeout, setProcessingTimeout] = useState(30); // seconds
+  const [maxMessagesContext, setMaxMessagesContext] = useState(20); // messages
 
   // Load existing data
   useEffect(() => {
@@ -79,31 +105,58 @@ Lembre-se: Seu objetivo é descobrir se existe fit e agendar uma conversa com no
     }
   }, [agentConfig]);
 
+  useEffect(() => {
+    if (aiConfig) {
+      setBatchingDelay(Math.round(aiConfig.batchingDelayMs / 1000));
+      setCooldownTime(Math.round(aiConfig.cooldownMs / 1000));
+      setProcessingTimeout(Math.round(aiConfig.processingTimeoutMs / 1000));
+      setMaxMessagesContext(aiConfig.maxMessagesContext);
+    }
+  }, [aiConfig]);
+
   const handleSave = async () => {
-    if (!agentConfig) {
-      toast.error("Configuração do agente não encontrada");
+    if (!internalOrgId) {
+      toast.error("Configuração do agente não encontrada. Complete o onboarding primeiro.");
       return;
     }
 
     setSaving(true);
     try {
-      // Save prompt
-      await createOrUpdatePrompt({
-        orgId: agentConfig.orgId,
-        content: prompt,
-        kind: "spin_sdr"
+      // Save AI configurations (batching settings) using internal org ID
+      await updateAiConfig({
+        orgId: internalOrgId,
+        batchingDelayMs: batchingDelay * 1000, // Convert to milliseconds
+        cooldownMs: cooldownTime * 1000,
+        processingTimeoutMs: processingTimeout * 1000,
+        maxMessagesContext: maxMessagesContext
       });
+
+      // Save prompt and agent settings only if agentConfig exists
+      if (agentConfig) {
+        try {
+          await createOrUpdatePrompt({
+            orgId: agentConfig.orgId,
+            content: prompt,
+            kind: "spin_sdr"
+          });
+          
+          await updateAgentSettings({
+            orgId: agentConfig.orgId,
+            responseTime: responseDelay,
+            personality: personality,
+            language: language,
+            toneOfVoice: personality
+          });
+          
+          toast.success("Todas as configurações salvas com sucesso!");
+        } catch (error) {
+          console.error("Error saving agent settings:", error);
+          toast.success("Configurações de batching salvas! (Configure o agente no onboarding para salvar prompts)");
+        }
+      } else {
+        toast.success("Configurações de batching salvas! (Complete o onboarding para configurar prompts)");
+      }
       
-      // Save agent settings
-      await updateAgentSettings({
-        orgId: agentConfig.orgId,
-        responseTime: responseDelay,
-        personality: personality,
-        language: language,
-        toneOfVoice: personality
-      });
-      
-      toast.success("Configurações salvas com sucesso!");
     } catch (error) {
       console.error("Error saving settings:", error);
       toast.error("Erro ao salvar configurações");
@@ -228,6 +281,92 @@ Lembre-se: Seu objetivo é descobrir se existe fit e agendar uma conversa com no
               <p className="text-xs text-muted-foreground mt-2">
                 Último prompt salvo: {activePrompt ? "Carregado" : "Padrão"}
               </p>
+            </CardContent>
+          </Card>
+
+          {/* Configurações de Batching */}
+          <Card className="glass mt-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Clock className="h-4 w-4" />
+                Configurações de Batching
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Controle de tempo de processamento das mensagens
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="batchingDelay" className="text-xs">
+                  Delay de Batching (segundos)
+                </Label>
+                <Input
+                  id="batchingDelay"
+                  type="number"
+                  value={batchingDelay}
+                  onChange={(e) => setBatchingDelay(Number(e.target.value))}
+                  min="1"
+                  max="10"
+                  className="text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tempo para aguardar mensagens adicionais
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cooldownTime" className="text-xs">
+                  Cooldown entre Respostas (segundos)
+                </Label>
+                <Input
+                  id="cooldownTime"
+                  type="number"
+                  value={cooldownTime}
+                  onChange={(e) => setCooldownTime(Number(e.target.value))}
+                  min="1"
+                  max="30"
+                  className="text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Intervalo mínimo entre respostas da IA
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="processingTimeout" className="text-xs">
+                  Timeout de Processamento (segundos)
+                </Label>
+                <Input
+                  id="processingTimeout"
+                  type="number"
+                  value={processingTimeout}
+                  onChange={(e) => setProcessingTimeout(Number(e.target.value))}
+                  min="10"
+                  max="120"
+                  className="text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Timeout para processos travados
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxMessagesContext" className="text-xs">
+                  Máximo de Mensagens no Contexto
+                </Label>
+                <Input
+                  id="maxMessagesContext"
+                  type="number"
+                  value={maxMessagesContext}
+                  onChange={(e) => setMaxMessagesContext(Number(e.target.value))}
+                  min="5"
+                  max="50"
+                  className="text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Quantidade de mensagens incluídas no contexto
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>

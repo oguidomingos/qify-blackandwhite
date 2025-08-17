@@ -39,6 +39,15 @@ export const updateVariables = internalMutation({
           summary: v.optional(v.string()),
         })
       ),
+      collectedData: v.optional(
+        v.object({
+          name: v.array(v.string()),
+          personType: v.array(v.string()),
+          business: v.array(v.string()),
+          contact: v.array(v.string()),
+          lastUpdated: v.number(),
+        })
+      ),
     }),
   },
   handler: async (ctx: any, { sessionId, variables }: any) => {
@@ -99,9 +108,17 @@ export const checkAndSetProcessing = mutation({
     const session = await ctx.db.get(sessionId);
     if (!session) return false;
     
+    // Get AI configuration for dynamic timeout and cooldown values
+    const aiConfig = await ctx.db
+      .query("ai_configurations")
+      .withIndex("by_org", (q: any) => q.eq("orgId", session.orgId))
+      .first();
+    
+    // Use dynamic values or fallback to defaults
+    const PROCESSING_TIMEOUT = aiConfig?.processingTimeoutMs || 30000; // 30 seconds default
+    const COOLDOWN_MS = aiConfig?.cooldownMs || 5000; // 5 seconds default
+    
     const now = Date.now();
-    const PROCESSING_TIMEOUT = 30000; // 30 seconds
-    const COOLDOWN_MS = 5000; // 5 seconds between AI responses
     
     // Check if already processing and not timed out
     if (session.processingLock && 

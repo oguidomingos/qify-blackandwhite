@@ -160,6 +160,15 @@ export default defineSchema({
           summary: v.optional(v.string()),
         })
       ),
+      collectedData: v.optional(
+        v.object({
+          name: v.array(v.string()),
+          personType: v.array(v.string()),
+          business: v.array(v.string()),
+          contact: v.array(v.string()),
+          lastUpdated: v.number(),
+        })
+      ),
     }),
     processingLock: v.optional(v.boolean()), // For batching control
     lastProcessedAt: v.optional(v.number()), // Timestamp of last AI processing
@@ -197,6 +206,16 @@ export default defineSchema({
     active: v.boolean(),
     createdAt: v.number(),
   }).index("by_org_kind_active", ["orgId", "kind", "active"]),
+
+  ai_configurations: defineTable({
+    orgId: v.id("organizations"),
+    batchingDelayMs: v.number(), // Delay to wait for more messages
+    cooldownMs: v.number(), // Cooldown between AI responses
+    processingTimeoutMs: v.number(), // Timeout for stuck processes
+    maxMessagesContext: v.number(), // Max messages to include in context
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_org", ["orgId"]),
 
   appointments: defineTable({
     orgId: v.id("organizations"),
