@@ -10,7 +10,7 @@ export const listBySession = internalQuery({
     return await ctx.db
       .query("messages")
       .withIndex("by_session_time", (q: any) => q.eq("sessionId", sessionId))
-      .order("asc")
+      .order("desc") // Most recent first - CRITICAL FIX
       .take(limit);
   },
 });

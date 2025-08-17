@@ -30,12 +30,15 @@ export const generateAiReply = action({
       }
 
       // Get ALL messages for better context (increased from 10 to 20)
-      const messages = await ctx.runQuery(internal.messages.listBySession, { 
+      const messagesDesc = await ctx.runQuery(internal.messages.listBySession, { 
         sessionId,
         limit: 20,
       });
 
-      console.log(`Processing AI reply for session ${sessionId} with ${messages.length} messages in context`);
+      // Reverse to chronological order for proper context building
+      const messages = messagesDesc.reverse();
+
+      console.log(`Processing AI reply for session ${sessionId} with ${messages.length} messages in context (most recent: "${messages[messages.length - 1]?.text || 'none'}")`);
 
       // Get full prompt (system message + user methodology)
       const promptData = await ctx.runQuery("aiPrompts:getFullPrompt", {
@@ -82,6 +85,10 @@ export const generateAiReply = action({
         text: response,
       });
 
+      // Save collected data to session variables BEFORE updating insights
+      const collectedInfo = analyzeCollectedData(messages.filter(m => m.direction === "inbound").map(m => m.text));
+      await saveCollectedDataToSession(ctx, sessionId, collectedInfo);
+      
       // Update session with AI insights and reset processing lock
       await updateSessionFromResponse(ctx, sessionId, response, session);
       
@@ -127,7 +134,15 @@ export const queryActivePrompt = internalQuery({
 function buildEnhancedSpinConversation(messages: any[], session: any, promptData: any) {
   const systemPrompt = promptData?.fullPrompt || getDefaultSpinPrompt();
   
-  // Analyze collected information from messages
+  // Get PERSISTENT data from session variables (PRIMARY SOURCE)
+  const persistedData = session.variables?.collectedData || {
+    name: [],
+    personType: [],
+    business: [],
+    contact: []
+  };
+  
+  // Also analyze current messages for ADDITIONAL data
   const userResponses = messages
     .filter(msg => msg.direction === "inbound")
     .map(msg => msg.text);
@@ -136,10 +151,20 @@ function buildEnhancedSpinConversation(messages: any[], session: any, promptData
     .filter(msg => msg.direction === "outbound")
     .map(msg => msg.text);
 
-  // Extract collected data from user responses
-  const collectedInfo = analyzeCollectedData(userResponses);
-  console.log('Collected info analysis:', JSON.stringify(collectedInfo));
-  console.log('User responses:', JSON.stringify(userResponses));
+  // Extract collected data from user responses (SECONDARY)
+  const currentAnalysis = analyzeCollectedData(userResponses);
+  
+  // MERGE persisted data with current analysis
+  const collectedInfo = {
+    name: [...new Set([...persistedData.name, ...currentAnalysis.name])],
+    personType: [...new Set([...persistedData.personType, ...currentAnalysis.personType])],
+    business: [...new Set([...persistedData.business, ...currentAnalysis.business])],
+    contact: [...new Set([...persistedData.contact, ...currentAnalysis.contact])]
+  };
+  
+  console.log('Persisted data from DB:', JSON.stringify(persistedData));
+  console.log('Current analysis:', JSON.stringify(currentAnalysis));
+  console.log('Final merged info:', JSON.stringify(collectedInfo));
   
   // Build conversation history with clear separation
   const conversationHistory = messages
@@ -172,31 +197,32 @@ function buildEnhancedSpinConversation(messages: any[], session: any, promptData
 - Seja natural e empático
 `;
   } else {
+    // Determine conversation status based on persisted data
+    const hasName = collectedInfo.name.length > 0;
+    const hasPersonType = collectedInfo.personType.length > 0;
+    const hasBusinessInfo = collectedInfo.business.length > 0;
+    
+    let nextAction = "";
+    if (!hasPersonType) {
+      nextAction = "Perguntar se é pessoa física ou jurídica";
+    } else if (hasPersonType && !hasBusinessInfo) {
+      nextAction = "Cliente já é pessoa jurídica - Perguntar sobre a NECESSIDADE/PROBLEMA específico";
+    } else {
+      nextAction = "Iniciar qualificação SPIN sobre a necessidade específica";
+    }
+
     contextInstructions = `
-📊 DADOS JÁ COLETADOS:
-${collectedInfo.name.length > 0 ? `✅ Nome: ${collectedInfo.name.join(', ')}` : '❌ Nome: NÃO COLETADO'}
-${collectedInfo.personType.length > 0 ? `✅ Tipo de Pessoa: ${collectedInfo.personType.join(', ')}` : '❌ Tipo pessoa (física/jurídica): NÃO COLETADO'}
-${collectedInfo.business.length > 0 ? `✅ Negócio/Empresa: ${collectedInfo.business.join(', ')}` : '❌ Empresa/Negócio: NÃO COLETADO'}
-${collectedInfo.contact.length > 0 ? `✅ Contato: ${collectedInfo.contact.join(', ')}` : '❌ Contato adicional: NÃO COLETADO'}
+**DADOS PERSISTIDOS NO SISTEMA:**
+- Nome: ${collectedInfo.name.length > 0 ? collectedInfo.name.join(', ') : 'NÃO COLETADO'}
+- Tipo: ${collectedInfo.personType.length > 0 ? collectedInfo.personType.join(', ') : 'NÃO COLETADO'}
+- Empresa: ${collectedInfo.business.length > 0 ? collectedInfo.business.join(', ') : 'NÃO COLETADO'}
 
-🚨 REGRAS CRÍTICAS - LEIA COM ATENÇÃO:
-- NUNCA repita perguntas sobre dados já coletados acima
-- Se já informou ser "pessoa jurídica" ou "represento empresa", NÃO pergunte novamente
-- Se já mencionou empresa (ex: Iceberg), passe para próxima etapa
-- SEMPRE use as informações coletadas para personalizar a conversa
-- OLHE OS DADOS COLETADOS ACIMA antes de fazer qualquer pergunta
+**REGRA FUNDAMENTAL:** NUNCA repita perguntas sobre dados já coletados acima.
 
-📝 SUAS ÚLTIMAS PERGUNTAS/RESPOSTAS:
-${recentResponses.slice(-2).map((resp, i) => `${i + 1}. ${resp}`).join('\n')}
+**PRÓXIMA AÇÃO:** ${nextAction}
 
-⚠️ EVITE REPETIR:
-- Perguntas: ${previousQuestions.slice(0, 3).join(' | ')}
-- Frases: ${previousPhrases.slice(0, 3).join(' | ')}
-
-🎯 PRÓXIMA AÇÃO:
-${!hasPersonType ? "Coletar se é PESSOA FÍSICA ou JURÍDICA" : 
-  hasPersonType && !hasBusinessInfo ? "Cliente já disse ser pessoa jurídica - PERGUNTAR SOBRE NECESSIDADE/PROBLEMA específico" : 
-  "Cliente já informou empresa - INICIAR QUALIFICAÇÃO SPIN sobre a necessidade específica"}
+**SUAS ÚLTIMAS RESPOSTAS:**
+${recentResponses.slice(-2).map((resp, i) => `${i + 1}. ${resp.substring(0, 100)}...`).join('\n')}
 `;
   }
 
@@ -209,15 +235,15 @@ ${!hasPersonType ? "Coletar se é PESSOA FÍSICA ou JURÍDICA" :
 
 ${contextInstructions}
 
-📞 HISTÓRICO COMPLETO DA CONVERSA:
+**HISTÓRICO DA CONVERSA:**
 ${conversationHistory}
 
-🎯 GERE SUA PRÓXIMA RESPOSTA:
-- Use os dados já coletados
-- NÃO repita perguntas respondidas
-- Avance logicamente na metodologia
-- Seja natural e empático
-- Máximo 2-3 frases`
+**INSTRUÇÕES FINAIS:**
+- Use os dados persistidos do sistema
+- NÃO repita perguntas já respondidas
+- Siga a próxima ação indicada
+- Seja direto e empático
+- Máximo 2 frases`
           }
         ]
       }
@@ -234,40 +260,95 @@ function analyzeCollectedData(userResponses: string[]) {
   };
 
   userResponses.forEach(response => {
-    const text = response.toLowerCase();
+    const text = response.toLowerCase().trim();
     const originalResponse = response.trim();
     
-    // Detect person type (física/jurídica)
-    if (/(pessoa\s+(física|juridica|jurídica)|física|jurídica|pj|pf|represento|empresa|iceberg)/i.test(originalResponse)) {
+    // Detect person type (física/jurídica) - EXPANDED PATTERNS
+    if (/(pessoa\s*(física|juridica|jurídica)|^(física|jurídica|pj|pf)$|represento|empresa|iceberg|juridica|juridic)/i.test(originalResponse)) {
       info.personType.push(originalResponse);
     }
     
     // Detect names (simple heuristic) - but exclude business-related responses
-    if (/^[a-záêçõúíó\s]{2,30}$/i.test(originalResponse) && 
+    const namePattern = /^[a-záêçõúíó\s]{2,50}$/i;
+    const excludeWords = /(sim|não|ok|tudo|bem|oi|olá|empresa|negócio|pessoa|física|jurídica|represento|sou|trabalho|atuo)/i;
+    
+    if (namePattern.test(originalResponse) && 
         originalResponse.split(' ').length >= 1 && 
-        originalResponse.split(' ').length <= 4 &&
-        !/(sim|não|ok|tudo|bem|oi|olá|empresa|negócio|pessoa|física|jurídica|represento|sou)/i.test(text)) {
-      info.name.push(originalResponse);
+        originalResponse.split(' ').length <= 5 &&
+        !excludeWords.test(text)) {
+      // Additional check: not common greetings or business terms
+      if (!/(ola|oi|tudo|bem|bom|dia|tarde|noite|obrigad)/.test(text)) {
+        info.name.push(originalResponse);
+      }
     }
     
-    // Detect business/company info - expanded patterns
-    if (/(empresa|negócio|trabalho|atuo|sou|faço|vendo|presto|serviço|represento|iceberg|ltda|ltd|s\.a\.|sa|mei)/i.test(text)) {
+    // Detect business/company info - MUCH MORE COMPREHENSIVE
+    const businessPatterns = [
+      /(empresa|negócio|trabalho|atuo|sou|faço|vendo|presto|serviço)/i,
+      /(represento|iceberg|ltda|ltd|s\.a\.|sa|mei|eireli)/i,
+      /(marketing|vendas|consultoria|tecnologia|software|agência)/i,
+      /(agencia|agency|consulting|development|sistemas)/i
+    ];
+    
+    if (businessPatterns.some(pattern => pattern.test(originalResponse))) {
       info.business.push(originalResponse);
     }
     
     // Detect contact info
-    if (/(whatsapp|telefone|email|contato|\@|\.com)/i.test(text)) {
+    if (/(whatsapp|telefone|email|contato|\@|\.com|\.br|\d{10,})/i.test(text)) {
       info.contact.push(originalResponse);
     }
   });
 
-  // Remove duplicates
-  info.name = [...new Set(info.name)];
-  info.business = [...new Set(info.business)];
+  // Remove duplicates and filter
+  info.name = [...new Set(info.name)].filter(n => n.length > 1);
+  info.business = [...new Set(info.business)].filter(b => b.length > 2);
   info.contact = [...new Set(info.contact)];
-  info.personType = [...new Set(info.personType)];
+  info.personType = [...new Set(info.personType)].filter(p => p.length > 1);
 
   return info;
+}
+
+async function saveCollectedDataToSession(ctx: any, sessionId: string, collectedInfo: any) {
+  const session = await ctx.runQuery(internal.sessions.getById, { sessionId });
+  if (!session) return;
+
+  let variables = session.variables || {};
+  
+  // Initialize collected data structure if not exists
+  if (!variables.collectedData) {
+    variables.collectedData = {
+      name: [],
+      personType: [],
+      business: [],
+      contact: [],
+      lastUpdated: Date.now()
+    };
+  }
+
+  // Merge new data with existing, avoiding duplicates
+  if (collectedInfo.name.length > 0) {
+    variables.collectedData.name = [...new Set([...variables.collectedData.name, ...collectedInfo.name])];
+  }
+  if (collectedInfo.personType.length > 0) {
+    variables.collectedData.personType = [...new Set([...variables.collectedData.personType, ...collectedInfo.personType])];
+  }
+  if (collectedInfo.business.length > 0) {
+    variables.collectedData.business = [...new Set([...variables.collectedData.business, ...collectedInfo.business])];
+  }
+  if (collectedInfo.contact.length > 0) {
+    variables.collectedData.contact = [...new Set([...variables.collectedData.contact, ...collectedInfo.contact])];
+  }
+
+  variables.collectedData.lastUpdated = Date.now();
+
+  console.log('Saving collected data to session:', JSON.stringify(variables.collectedData));
+
+  // Save to database
+  await ctx.runMutation(internal.sessions.updateVariables, {
+    sessionId,
+    variables
+  });
 }
 
 async function callGemini(conversationContext: any): Promise<string> {
