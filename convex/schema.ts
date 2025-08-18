@@ -105,7 +105,13 @@ export default defineSchema({
     orgId: v.id("organizations"),
     provider: v.string(), // "evolution"
     instanceId: v.string(),
+    instanceName: v.optional(v.string()), // NEW: Human-readable instance name
     phoneNumber: v.string(),
+    status: v.optional(v.string()), // NEW: "pending"|"connected"|"error"
+    qrCode: v.optional(v.string()), // NEW: Base64 QR code for pairing
+    lastQrAt: v.optional(v.number()), // NEW: When QR was last generated
+    lastWebhookTestAt: v.optional(v.number()), // NEW: When webhook was last tested
+    webhookVerified: v.optional(v.boolean()), // NEW: Whether webhook is working
     webhookSecret: v.optional(v.string()),
     sharedToken: v.string(),
     baseUrl: v.string(),
@@ -113,8 +119,10 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_instance", ["instanceId"])
+    .index("by_instance_name", ["instanceName"]) // NEW: Index for lookup by name
     .index("by_phone", ["phoneNumber"])
-    .index("by_org", ["orgId"]),
+    .index("by_org", ["orgId"])
+    .index("by_org_status", ["orgId", "status"]), // NEW: Index for filtering by status
 
   contacts: defineTable({
     orgId: v.id("organizations"),
@@ -176,7 +184,9 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_org_contact", ["orgId", "contactId"])
-    .index("by_org_last", ["orgId", "lastActivityAt"]),
+    .index("by_org_last", ["orgId", "lastActivityAt"])
+    .index("by_org_stage", ["orgId", "stage"]) // NEW: Index for SPIN stage queries
+    .index("by_org_status", ["orgId", "status"]), // NEW: Index for status queries
 
   messages: defineTable({
     orgId: v.id("organizations"),

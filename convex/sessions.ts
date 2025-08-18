@@ -152,3 +152,111 @@ export const resetProcessing = mutation({
     });
   },
 });
+
+// SPIN-specific queries for dashboard
+export const listByStage = query({
+  args: { 
+    orgId: v.id("organizations"), 
+    stage: v.string() 
+  },
+  handler: async (ctx, { orgId, stage }) => {
+    return await ctx.db
+      .query("sessions")
+      .withIndex("by_org_stage", (q) => q.eq("orgId", orgId).eq("stage", stage))
+      .order("desc")
+      .collect();
+  },
+});
+
+export const listQualified = query({
+  args: { 
+    orgId: v.id("organizations"),
+    minScore: v.optional(v.number()) // Default to 70
+  },
+  handler: async (ctx, { orgId, minScore = 70 }) => {
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_org_last", (q) => q.eq("orgId", orgId))
+      .collect();
+
+    // Filter by SPIN score
+    return sessions.filter(session => {
+      const spinScore = session.variables.spin?.score;
+      return typeof spinScore === 'number' && spinScore >= minScore;
+    }).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  },
+});
+
+export const listSpin = query({
+  args: { orgId: v.id("organizations") },
+  handler: async (ctx, { orgId }) => {
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_org_last", (q) => q.eq("orgId", orgId))
+      .collect();
+
+    // Only return sessions with SPIN data
+    return sessions
+      .filter(session => session.variables.spin)
+      .map(session => ({
+        id: session._id,
+        contactId: session.contactId,
+        status: session.status,
+        stage: session.stage,
+        spinStage: session.variables.spin?.stage,
+        score: session.variables.spin?.score || 0,
+        qualified: (session.variables.spin?.score || 0) >= 70,
+        lastActivityAt: session.lastActivityAt,
+        createdAt: session.createdAt,
+        summary: session.variables.spin?.summary,
+      }))
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  },
+});
+
+export const listPending = query({
+  args: { orgId: v.id("organizations") },
+  handler: async (ctx, { orgId }) => {
+    // Get sessions that have recent inbound messages but no recent outbound response
+    const recentSessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_org_status", (q) => q.eq("orgId", orgId).eq("status", "active"))
+      .collect();
+
+    const pendingSessions = [];
+
+    for (const session of recentSessions) {
+      // Get recent messages for this session
+      const messages = await ctx.db
+        .query("messages")
+        .withIndex("by_session_time", (q) => q.eq("sessionId", session._id))
+        .order("desc")
+        .take(5);
+
+      if (messages.length === 0) continue;
+
+      const lastMessage = messages[0];
+      const hasRecentInbound = lastMessage.direction === "inbound";
+      
+      // Check if there's an outbound response after the last inbound
+      const hasOutboundResponse = messages.some((msg, index) => 
+        msg.direction === "outbound" && 
+        index > 0 && 
+        messages[index - 1].direction === "inbound"
+      );
+
+      if (hasRecentInbound && !hasOutboundResponse) {
+        pendingSessions.push({
+          ...session,
+          lastMessage: {
+            text: lastMessage.text,
+            createdAt: lastMessage.createdAt,
+            direction: lastMessage.direction,
+          },
+        });
+      }
+    }
+
+    return pendingSessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  },
+});

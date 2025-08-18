@@ -22,6 +22,7 @@ import type * as businessProfiles from "../businessProfiles.js";
 import type * as contacts from "../contacts.js";
 import type * as google from "../google.js";
 import type * as messages from "../messages.js";
+import type * as metrics from "../metrics.js";
 import type * as organizationSettings from "../organizationSettings.js";
 import type * as organizations from "../organizations.js";
 import type * as sessions from "../sessions.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   contacts: typeof contacts;
   google: typeof google;
   messages: typeof messages;
+  metrics: typeof metrics;
   organizationSettings: typeof organizationSettings;
   organizations: typeof organizations;
   sessions: typeof sessions;

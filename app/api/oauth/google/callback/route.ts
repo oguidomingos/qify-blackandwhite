@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchMutation } from "convex/nextjs";
+import { api } from "../../../../../convex/_generated/api";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -64,8 +66,18 @@ export async function GET(req: NextRequest) {
 
     const userinfo = await userinfoResponse.json();
 
-    // TODO: Save credentials to Convex
-    // This would require setting up Convex HTTP API
+    // Save credentials to Convex
+    await fetchMutation(api.google.saveCredentials, {
+      orgId,
+      userId,
+      provider: "google",
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiryDate: Date.now() + (tokens.expires_in * 1000),
+      scopes: "https://www.googleapis.com/auth/calendar",
+      email: userinfo.email,
+    });
+
     console.log("Google OAuth success:", {
       orgId,
       userId,

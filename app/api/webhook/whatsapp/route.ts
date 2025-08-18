@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { fetchMutation } from "convex/nextjs";
+import { api } from "../../../../convex/_generated/api";
 
 function verifySignature(reqBody: string, signature: string, secret: string): boolean {
   if (!signature || !secret) return false;
@@ -11,6 +13,75 @@ function verifySignature(reqBody: string, signature: string, secret: string): bo
   } catch (error) {
     console.error("Error verifying signature:", error);
     return false;
+  }
+}
+
+async function processWebhookEvent(instanceId: string, payload: any) {
+  const { event, data } = payload;
+
+  console.log(`Processing webhook event: ${event} for instance: ${instanceId}`);
+
+  switch (event) {
+    case "connection.update":
+      // Handle connection status changes
+      if (data?.state) {
+        let status = "pending";
+        
+        switch (data.state) {
+          case "open":
+          case "connecting":
+            status = "connected";
+            break;
+          case "close":
+          case "disconnected":
+            status = "error";
+            break;
+          case "connecting":
+            status = "pending";
+            break;
+          default:
+            status = data.state;
+        }
+
+        console.log(`Updating instance ${instanceId} status to: ${status}`);
+        
+        await fetchMutation(api.wa.updateStatus, {
+          instanceId,
+          status,
+        });
+      }
+      break;
+
+    case "message.received":
+    case "message.upsert":
+      // Handle incoming messages - can trigger webhook verification
+      if (data?.messages && Array.isArray(data.messages)) {
+        for (const message of data.messages) {
+          if (message.key?.fromMe === false) {
+            // This is an inbound message - mark webhook as verified for this instance
+            console.log(`Inbound message received for instance ${instanceId} - marking webhook as verified`);
+            
+            // We don't have the account ID here, so we'll update by instanceId
+            // This will be handled in the wa.updateStatus mutation
+            await fetchMutation(api.wa.updateStatus, {
+              instanceId,
+              status: "connected", // Ensure it's connected if receiving messages
+            });
+          }
+        }
+      }
+      break;
+
+    case "qr.update":
+      // Handle QR code updates
+      if (data?.qr) {
+        console.log(`QR code updated for instance ${instanceId}`);
+        // Update QR code in database if needed
+      }
+      break;
+
+    default:
+      console.log(`Unhandled webhook event: ${event}`);
   }
 }
 
@@ -58,8 +129,14 @@ export async function POST(req: NextRequest) {
       hasData: !!payload.data,
     });
 
-    // TODO: Process webhook through Convex
-    // This would require setting up Convex HTTP API or using a different approach
+    // Process webhook events
+    try {
+      await processWebhookEvent(instanceId, payload);
+    } catch (error) {
+      console.error("Error processing webhook event:", error);
+      // Don't fail the webhook - just log the error
+    }
+
     console.log("Webhook received successfully:", {
       instanceId,
       event: payload.event,
