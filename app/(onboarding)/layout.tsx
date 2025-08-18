@@ -40,8 +40,10 @@ export default function OnboardingLayout({
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col">
-          <main className="flex-1">
-            {children}
+          <main className="flex-1 p-6">
+            <div className="max-w-4xl mx-auto">
+              {children}
+            </div>
           </main>
         </div>
       </div>

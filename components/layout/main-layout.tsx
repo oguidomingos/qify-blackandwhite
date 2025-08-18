@@ -17,8 +17,10 @@ export function MainLayout({ children }: MainLayoutProps) {
       {/* Main Content */}
       <div className="relative z-10 flex h-screen">
         <Sidebar />
-        <main className="flex-1 overflow-auto">
-          {children}
+        <main className="flex-1 overflow-auto p-6">
+          <div className="max-w-7xl mx-auto">
+            {children}
+          </div>
         </main>
       </div>
     </div>
