@@ -47,3 +47,40 @@ export const create = mutation({
     });
   },
 });
+
+export const upsertFromEvolution = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    evolutionData: v.any()
+  },
+  handler: async (ctx: any, { orgId, evolutionData }: any) => {
+    const externalId = evolutionData.id || evolutionData.remoteJid;
+    
+    // Check if contact already exists
+    const existing = await ctx.db
+      .query("contacts")
+      .withIndex("by_org_external", (q: any) => q.eq("orgId", orgId).eq("externalId", externalId))
+      .first();
+    
+    const contactData = {
+      orgId,
+      name: evolutionData.pushName || evolutionData.name || externalId.split('@')[0],
+      channel: "whatsapp",
+      externalId,
+      lastMessageAt: evolutionData.lastMessageTimestamp || Date.now(),
+      createdAt: evolutionData.createdAt || Date.now()
+    };
+    
+    if (existing) {
+      // Update existing contact
+      await ctx.db.patch(existing._id, {
+        name: contactData.name,
+        lastMessageAt: contactData.lastMessageAt
+      });
+      return existing._id;
+    } else {
+      // Create new contact
+      return await ctx.db.insert("contacts", contactData);
+    }
+  },
+});

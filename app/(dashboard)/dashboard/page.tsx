@@ -6,6 +6,7 @@ import { MessageSquare, Users, Bot, TrendingUp, Clock, CheckCircle } from "lucid
 import { useOrganization, useUser } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import EvolutionDataComponent from "./evolution-data";
 
 export default function DashboardPage() {
   const { organization } = useOrganization();
@@ -275,6 +276,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Evolution API Real Data */}
+      <EvolutionDataComponent />
     </div>
   );
 }

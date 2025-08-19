@@ -152,3 +152,60 @@ export const addWhatsAppAccount = mutation({
     return { status: "success" };
   },
 });
+
+export const createForInstance = mutation({
+  args: {
+    instanceName: v.string(),
+    name: v.string(),
+    settings: v.optional(v.any())
+  },
+  handler: async (ctx, { instanceName, name, settings }) => {
+    // Extract phone number from instance name
+    const phoneNumber = instanceName.replace('qify-', '');
+    
+    // Create organization
+    const orgId = await ctx.db.insert("organizations", {
+      name: name,
+      clerkOrgId: `auto-${instanceName}`,
+      billingPlan: "starter",
+      onboardingStep: "completed",
+      onboardingCompleted: true,
+      createdAt: Date.now(),
+    });
+    
+    // Create agent configuration
+    await ctx.db.insert("agent_configurations", {
+      orgId: orgId,
+      agentName: "SDR Agent",
+      phoneNumber: phoneNumber,
+      personality: "professional",
+      toneOfVoice: "Profissional e consultivo",
+      language: "pt-BR",
+      responseTime: 3,
+      workingHours: {
+        start: "09:00",
+        end: "18:00",
+        timezone: "America/Sao_Paulo",
+        workDays: ["mon", "tue", "wed", "thu", "fri"]
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    
+    // Create WhatsApp account
+    await ctx.db.insert("whatsapp_accounts", {
+      orgId: orgId,
+      provider: "evolution",
+      instanceId: instanceName,
+      instanceName: instanceName,
+      phoneNumber: phoneNumber,
+      status: "connected",
+      sharedToken: "shared_token_32_characters_long",
+      baseUrl: "https://evolutionapi.centralsupernova.com.br",
+      token: "509dbd54-c20c-4a5b-b889-a0494a861f5a",
+      createdAt: Date.now(),
+    });
+    
+    return await ctx.db.get(orgId);
+  },
+});

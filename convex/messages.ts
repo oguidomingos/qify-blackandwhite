@@ -139,3 +139,110 @@ export const getByInstance = query({
       .take(limit);
   },
 });
+
+export const upsertFromEvolution = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    evolutionData: v.any()
+  },
+  handler: async (ctx: any, { orgId, evolutionData }: any) => {
+    const messageId = evolutionData.id || evolutionData.key?.id;
+    const remoteJid = evolutionData.key?.remoteJid || evolutionData.remoteJid;
+    
+    if (!messageId || !remoteJid) {
+      console.log("Missing message ID or remoteJid, skipping...");
+      return null;
+    }
+    
+    // Check if message already exists
+    const existing = await ctx.db
+      .query("messages")
+      .withIndex("by_provider_id", (q: any) => q.eq("providerMessageId", messageId))
+      .first();
+    
+    if (existing) {
+      console.log("Message already exists:", messageId);
+      return existing._id;
+    }
+    
+    // Find or create contact
+    let contact = await ctx.db
+      .query("contacts")
+      .withIndex("by_org_external", (q: any) => q.eq("orgId", orgId).eq("externalId", remoteJid))
+      .first();
+    
+    if (!contact) {
+      // Create contact
+      const contactId = await ctx.db.insert("contacts", {
+        orgId,
+        name: evolutionData.pushName || remoteJid.split('@')[0],
+        channel: "whatsapp",
+        externalId: remoteJid,
+        createdAt: Date.now(),
+        lastMessageAt: Date.now()
+      });
+      contact = await ctx.db.get(contactId);
+    }
+    
+    // Find or create session
+    let session = await ctx.db
+      .query("sessions")
+      .withIndex("by_org_contact", (q: any) => q.eq("orgId", orgId).eq("contactId", contact._id))
+      .first();
+    
+    if (!session) {
+      // Create session
+      const sessionId = await ctx.db.insert("sessions", {
+        orgId,
+        contactId: contact._id,
+        status: "active",
+        spinStage: "S", // Default SPIN stage
+        totalMessages: 0,
+        lastMessageAt: Date.now(),
+        createdAt: Date.now()
+      });
+      session = await ctx.db.get(sessionId);
+    }
+    
+    // Determine message direction and text
+    const message = evolutionData.message || evolutionData;
+    const text = message.conversation || 
+                 message.extendedTextMessage?.text || 
+                 message.imageMessage?.caption || 
+                 message.videoMessage?.caption ||
+                 "Mídia recebida";
+    
+    const direction = evolutionData.fromMe ? "outbound" : "inbound";
+    
+    // Create message
+    const messageData = {
+      orgId,
+      sessionId: session._id,
+      contactId: contact._id,
+      direction,
+      text,
+      providerMessageId: messageId,
+      createdAt: evolutionData.messageTimestamp || Date.now()
+    };
+    
+    const newMessageId = await ctx.db.insert("messages", messageData);
+    
+    // Update session
+    const sessionMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_session_time", (q: any) => q.eq("sessionId", session._id))
+      .collect();
+    
+    await ctx.db.patch(session._id, {
+      totalMessages: sessionMessages.length + 1,
+      lastMessageAt: messageData.createdAt
+    });
+    
+    // Update contact
+    await ctx.db.patch(contact._id, {
+      lastMessageAt: messageData.createdAt
+    });
+    
+    return newMessageId;
+  },
+});

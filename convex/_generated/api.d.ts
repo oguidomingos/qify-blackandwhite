@@ -20,6 +20,7 @@ import type * as aiPrompts from "../aiPrompts.js";
 import type * as auth from "../auth.js";
 import type * as businessProfiles from "../businessProfiles.js";
 import type * as contacts from "../contacts.js";
+import type * as evolution from "../evolution.js";
 import type * as google from "../google.js";
 import type * as messages from "../messages.js";
 import type * as metrics from "../metrics.js";
@@ -28,6 +29,7 @@ import type * as organizations from "../organizations.js";
 import type * as sessions from "../sessions.js";
 import type * as syncStatus from "../syncStatus.js";
 import type * as wa from "../wa.js";
+import type * as whatsapp_accounts from "../whatsapp_accounts.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -45,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   businessProfiles: typeof businessProfiles;
   contacts: typeof contacts;
+  evolution: typeof evolution;
   google: typeof google;
   messages: typeof messages;
   metrics: typeof metrics;
@@ -53,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   sessions: typeof sessions;
   syncStatus: typeof syncStatus;
   wa: typeof wa;
+  whatsapp_accounts: typeof whatsapp_accounts;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
