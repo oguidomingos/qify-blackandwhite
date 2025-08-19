@@ -83,22 +83,42 @@ export const create = mutation({
   args: {
     contactId: v.id("contacts"),
     orgId: v.id("organizations"),
-    channel: v.string(),
-    status: v.string()
+    status: v.string(),
+    spinStage: v.optional(v.string()),
+    totalMessages: v.optional(v.number()),
+    lastMessageAt: v.optional(v.number())
   },
   handler: async (ctx: any, args: any) => {
     const now = Date.now();
     return await ctx.db.insert("sessions", {
       orgId: args.orgId,
       contactId: args.contactId,
-      stage: "situation", // Default SPIN stage
+      stage: args.spinStage || "S", // Default SPIN stage
+      spinStage: args.spinStage || "S",
       status: args.status,
+      totalMessages: args.totalMessages || 0,
       variables: {},
-      lastActivityAt: now,
+      lastActivityAt: args.lastMessageAt || now,
+      lastMessageAt: args.lastMessageAt || now,
       createdAt: now,
       processingLock: false,
       lastProcessedAt: 0
     });
+  },
+});
+
+export const update = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    updates: v.object({
+      totalMessages: v.optional(v.number()),
+      lastMessageAt: v.optional(v.number()),
+      status: v.optional(v.string()),
+      spinStage: v.optional(v.string())
+    })
+  },
+  handler: async (ctx: any, { sessionId, updates }: any) => {
+    await ctx.db.patch(sessionId, updates);
   },
 });
 

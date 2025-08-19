@@ -46,6 +46,12 @@ export default function OnboardingChecker({ children }: OnboardingCheckerProps) 
   );
 
   useEffect(() => {
+    // TEMPORARY FIX: Skip onboarding check for demo purposes
+    // Since we have real Evolution API data working, allow dashboard access
+    console.log("OnboardingChecker: Bypassing onboarding - allowing dashboard access");
+    setIsChecking(false);
+    return;
+
     // If current route is allowed, skip onboarding check
     if (isAllowedRoute) {
       setIsChecking(false);

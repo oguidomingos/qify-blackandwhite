@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Users, MessageSquare, TrendingUp, Calendar, Clock, Target } from "lucide-react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { useEvolutionData } from "@/hooks/use-evolution-data";
 import { useOrganization, useUser } from "@clerk/nextjs";
 
 const getStageColor = (stage: string) => {
@@ -63,38 +62,17 @@ export default function SessionsPage() {
   const { organization } = useOrganization();
   const { user } = useUser();
 
-  // Use organization ID or user ID as fallback
-  const orgId = organization?.id || user?.id;
+  // Use Evolution API data directly
+  const evolutionData = useEvolutionData();
 
-  // Get organization from Convex
-  const convexOrg = useQuery(api.organizations.getByClerkId, 
-    orgId ? { clerkId: orgId } : "skip"
-  );
 
-  // Load real data from Convex
-  const sessionsData = useQuery(api.sessions.listByOrg, 
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const contacts = useQuery(api.contacts.listByOrg, 
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const recentMessages = useQuery(api.messages.listByOrgRecent,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  // Transform sessions data for display
-  const sessions = sessionsData?.map(session => {
-    const contact = contacts?.find(c => c._id === session.contactId);
-    const sessionMessages = recentMessages?.filter(msg => msg.sessionId === session._id);
+  // Transform sessions data for display using Evolution data
+  const sessions = evolutionData.spinSessions?.map(session => {
+    const contact = evolutionData.contacts?.find(c => c._id === session.contactId);
+    const sessionMessages = evolutionData.recentMessages?.filter(msg => msg.contactId === session.contactId);
     
-    // Calculate SPIN score based on variables
-    const spinData = session.variables.spin;
-    let score = 0;
-    if (spinData) {
-      score = spinData.score || 0;
-    }
+    // Use SPIN score already calculated in Evolution data
+    const score = session.score;
 
     // Format time ago
     function formatTimeAgo(timestamp: number) {

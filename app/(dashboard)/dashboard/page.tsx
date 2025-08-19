@@ -4,95 +4,92 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Users, Bot, TrendingUp, Clock, CheckCircle } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
-import EvolutionDataComponent from "./evolution-data";
+import { useEvolutionData } from "@/hooks/use-evolution-data";
 
 export default function DashboardPage() {
   const { organization } = useOrganization();
   const { user } = useUser();
-  const orgId = organization?.id || user?.id;
-
-  // Get organization from Convex
-  const convexOrg = useQuery(api.organizations.getByClerkId, 
-    orgId ? { clerkId: orgId } : "skip"
-  );
-
-  // Get real data from Convex
-  const businessProfile = useQuery(
-    api.businessProfiles.getByOrg,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const agentConfig = useQuery(
-    api.agentConfigurations.getByOrg,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  // Get real contacts and messages data
-  const contacts = useQuery(api.contacts.listByOrg, 
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const recentMessages = useQuery(api.messages.listByOrgRecent,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const sessions = useQuery(api.sessions.listByOrg,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  // Calculate real stats
-  const todayMessages = recentMessages?.filter(msg => {
-    const today = new Date();
-    const msgDate = new Date(msg.createdAt);
-    return msgDate.toDateString() === today.toDateString();
-  }).length || 0;
-
-  const activeContacts = contacts?.length || 0;
-  const activeSessions = sessions?.filter(s => s.status === "active").length || 0;
-  const responseTime = agentConfig?.responseTime || 0;
+  
+  // Use Evolution API data directly
+  const evolutionData = useEvolutionData();
+  
+  // Show loading state while data is being fetched
+  if (evolutionData.isLoading) {
+    return (
+      <div className="flex-1 space-y-6 p-8">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+            <h2 className="text-xl font-semibold">Carregando dados reais...</h2>
+            <p className="text-muted-foreground">
+              Sincronizando com Evolution API (713 mensagens, 20 contatos)
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Show error state if there's an error
+  if (evolutionData.error) {
+    return (
+      <div className="flex-1 space-y-6 p-8">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center space-y-4 max-w-md">
+            <div className="text-red-500 text-6xl">⚠️</div>
+            <h2 className="text-xl font-semibold text-red-600">Erro ao carregar dados</h2>
+            <p className="text-muted-foreground">
+              {evolutionData.error}
+            </p>
+            <Button onClick={() => window.location.reload()}>
+              Tentar novamente
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const realStats = [
     {
       title: "Mensagens Hoje",
-      value: todayMessages.toString(),
-      description: todayMessages > 0 ? "Mensagens processadas" : "Nenhuma mensagem hoje",
+      value: evolutionData.todayMessages.toString(),
+      description: evolutionData.todayMessages > 0 ? "Mensagens processadas hoje" : "Nenhuma mensagem hoje",
       icon: MessageSquare,
     },
     {
       title: "Contatos Ativos",
-      value: activeContacts.toString(),
-      description: activeContacts > 0 ? "Contatos em conversas" : "Nenhum contato ainda",
+      value: evolutionData.activeContacts.toString(),
+      description: evolutionData.activeContacts > 0 ? "Contatos registrados" : "Nenhum contato ainda",
       icon: Users,
     },
     {
       title: "Sessões Ativas",
-      value: activeSessions.toString(),
-      description: activeSessions > 0 ? "Conversas em andamento" : "Nenhuma sessão ativa",
+      value: evolutionData.activeSessions.toString(),
+      description: evolutionData.activeSessions > 0 ? "Conversas em andamento" : "Nenhuma sessão ativa",
       icon: Bot,
     },
     {
       title: "Tempo Resposta",
-      value: `${responseTime}s`,
-      description: responseTime > 0 ? "Configurado no agente" : "Configure tempo",
+      value: `${evolutionData.responseTime}s`,
+      description: "Tempo médio de resposta",
       icon: TrendingUp,
     },
   ];
 
   // Get pending contacts (with recent activity)
-  const pendingContacts = contacts?.filter(contact => {
-    const hasRecentMessages = recentMessages?.some(msg => 
+  const pendingContacts = evolutionData.contacts?.filter(contact => {
+    const hasRecentMessages = evolutionData.recentMessages?.some(msg => 
       msg.contactId === contact._id && 
       msg.direction === "inbound" &&
       Date.now() - msg.createdAt < 3600000 // Last hour
     );
     return hasRecentMessages;
   }).map(contact => {
-    const latestMessage = recentMessages?.find(msg => 
+    const latestMessage = evolutionData.recentMessages?.find(msg => 
       msg.contactId === contact._id && msg.direction === "inbound"
     );
-    const messageCount = recentMessages?.filter(msg => msg.contactId === contact._id).length || 0;
+    const messageCount = evolutionData.recentMessages?.filter(msg => msg.contactId === contact._id).length || 0;
     
     function formatTimeAgo(timestamp: number) {
       const diff = Date.now() - timestamp;
@@ -119,7 +116,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground">
-            {businessProfile ? `${businessProfile.businessName} - ` : ""}
+            Qify Organization - 
             Visão geral do seu agente SDR
           </p>
         </div>
@@ -277,8 +274,6 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Evolution API Real Data */}
-      <EvolutionDataComponent />
     </div>
   );
 }

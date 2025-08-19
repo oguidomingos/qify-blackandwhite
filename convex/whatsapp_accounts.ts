@@ -11,6 +11,24 @@ export const getByOrg = query({
   },
 });
 
+export const create = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    provider: v.string(),
+    instanceId: v.string(),
+    instanceName: v.optional(v.string()),
+    phoneNumber: v.string(),
+    status: v.optional(v.string()),
+    sharedToken: v.optional(v.string()),
+    baseUrl: v.optional(v.string()),
+    token: v.optional(v.string()),
+    createdAt: v.number()
+  },
+  handler: async (ctx: any, args: any) => {
+    return await ctx.db.insert("whatsapp_accounts", args);
+  },
+});
+
 export const updateInstanceStatus = mutation({
   args: {
     orgId: v.id("organizations"),
