@@ -1,13 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Mic, Check, Edit, Users, Clock } from "lucide-react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { MessageSquare, Mic, Check, Edit, Users, Clock, Loader2 } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
+
+interface Contact {
+  _id: string;
+  name: string;
+  phoneNumber: string;
+  channel: string;
+  lastMessageAt: number;
+  isActive: boolean;
+}
+
+interface Chat {
+  _id: string;
+  contactId: string;
+  contactName: string;
+  unreadCount: number;
+  lastMessage: {
+    text: string;
+    timestamp: number;
+    direction: "inbound" | "outbound";
+  };
+  isActive: boolean;
+  lastActivityAt: number;
+}
+
+interface InboxData {
+  chats: Chat[];
+  statistics: {
+    total: number;
+    active: number;
+    unread: number;
+    totalUnreadMessages: number;
+  };
+}
 
 export default function InboxPage() {
   const { organization } = useOrganization();
@@ -15,46 +46,57 @@ export default function InboxPage() {
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [inboxData, setInboxData] = useState<InboxData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Use organization ID or user ID as fallback
-  const orgId = organization?.id || user?.id;
+  useEffect(() => {
+    const fetchInboxData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        // Fetch active chats from Evolution API
+        const response = await fetch('/api/evolution/chats?period=week&activeOnly=true&limit=50');
+        if (!response.ok) {
+          throw new Error('Falha ao carregar chats');
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+          setInboxData(data);
+        } else {
+          // Show specific error message from API
+          const errorMsg = data.message || 'Erro ao processar dados do inbox';
+          throw new Error(errorMsg);
+        }
+      } catch (err) {
+        console.error('Erro ao buscar dados do inbox:', err);
+        setError(err instanceof Error ? err.message : 'Erro desconhecido');
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  // Get organization from Convex
-  const convexOrg = useQuery(api.organizations.getByClerkId, 
-    orgId ? { clerkId: orgId } : "skip"
-  );
-
-  // Load real data from Convex
-  const contacts = useQuery(api.contacts.listByOrg, 
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const recentMessages = useQuery(api.messages.listByOrgRecent,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  const activeSessions = useQuery(api.sessions.listByOrg,
-    convexOrg ? { orgId: convexOrg._id } : "skip"
-  );
-
-  // Transform contacts data for display
-  const pendingContacts = contacts?.filter(contact => {
-    // Find if contact has recent activity
-    const hasRecentMessages = recentMessages?.some(msg => msg.contactId === contact._id);
-    return hasRecentMessages;
-  }).map(contact => {
-    // Get latest message for this contact
-    const latestMessage = recentMessages?.find(msg => msg.contactId === contact._id && msg.direction === "inbound");
-    const messageCount = recentMessages?.filter(msg => msg.contactId === contact._id).length || 0;
+    fetchInboxData();
     
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchInboxData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Transform chats data for display
+  const pendingContacts = inboxData?.chats?.map(chat => {
     return {
-      id: contact._id,
-      name: contact.name || "Contato sem nome",
-      platform: contact.channel || "whatsapp",
-      messages: messageCount,
-      lastMessage: latestMessage?.text || "Sem mensagens",
-      time: latestMessage ? formatTimeAgo(latestMessage.createdAt) : "Agora",
-      contact: contact
+      id: chat._id,
+      name: chat.contactName || "Contato sem nome",
+      platform: "whatsapp",
+      messages: chat.unreadCount || 1,
+      lastMessage: chat.lastMessage.text || "Sem mensagens",
+      time: formatTimeAgo(chat.lastMessage.timestamp),
+      contact: chat,
+      unreadCount: chat.unreadCount,
+      isActive: chat.isActive
     };
   }) || [];
 
@@ -188,14 +230,35 @@ export default function InboxPage() {
           </div>
 
           <div className="space-y-3">
-            {!convexOrg && (
+            {isLoading && (
               <div className="text-center p-4 text-muted-foreground">
-                <div className="animate-pulse">Carregando contatos...</div>
+                <div className="flex items-center justify-center space-x-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Carregando conversas...</span>
+                </div>
               </div>
             )}
-            {convexOrg && pendingContacts.length === 0 && (
+            {error && (
+              <div className="text-center p-4 space-y-3">
+                <div className="text-red-500 text-4xl">⚠️</div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-red-600">Evolution API Indisponível</p>
+                  <p className="text-xs text-muted-foreground">{error}</p>
+                </div>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="mt-2"
+                  onClick={() => window.location.reload()}
+                >
+                  Tentar novamente
+                </Button>
+              </div>
+            )}
+            {!isLoading && !error && pendingContacts.length === 0 && (
               <div className="text-center p-4 text-muted-foreground">
-                Nenhum contato pendente
+                <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Nenhuma conversa ativa</p>
               </div>
             )}
             {pendingContacts.map((contact) => (
@@ -216,6 +279,11 @@ export default function InboxPage() {
                         <span>{contact.platform}</span>
                         <span>•</span>
                         <span>{contact.messages} mensagens</span>
+                        {contact.unreadCount > 0 && (
+                          <Badge variant="secondary" className="text-xs">
+                            {contact.unreadCount} não lidas
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                         {contact.lastMessage}
@@ -277,16 +345,16 @@ export default function InboxPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Mensagens hoje</span>
-                <span className="text-foreground">{recentMessages?.length || 0}</span>
+                <span className="text-muted-foreground">Conversas ativas</span>
+                <span className="text-foreground">{inboxData?.statistics.active || 0}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Contatos ativos</span>
-                <span className="text-foreground">{pendingContacts.length}</span>
+                <span className="text-muted-foreground">Não lidas</span>
+                <span className="text-foreground">{inboxData?.statistics.totalUnreadMessages || 0}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Sessões ativas</span>
-                <span className="text-foreground">{activeSessions?.length || 0}</span>
+                <span className="text-muted-foreground">Total chats</span>
+                <span className="text-foreground">{inboxData?.statistics.total || 0}</span>
               </div>
             </CardContent>
           </Card>

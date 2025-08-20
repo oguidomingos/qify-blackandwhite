@@ -162,24 +162,21 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!convexOrg && (
+            {evolutionData.isLoading && (
               <div className="text-center py-8">
                 <div className="animate-pulse text-muted-foreground">
                   Carregando contatos...
                 </div>
               </div>
             )}
-            {convexOrg && pendingContacts.length === 0 && (
+            {!evolutionData.isLoading && pendingContacts.length === 0 && (
               <div className="text-center py-8">
                 <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                 <p className="text-muted-foreground">
                   Nenhum contato pendente
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {agentConfig?.phoneNumber 
-                    ? "Aguardando mensagens do WhatsApp"
-                    : "Complete a configuração do agente primeiro"
-                  }
+                  Aguardando mensagens do WhatsApp
                 </p>
               </div>
             )}
@@ -216,14 +213,14 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!convexOrg && (
+            {evolutionData.isLoading && (
               <div className="text-center py-8">
                 <div className="animate-pulse text-muted-foreground">
                   Carregando atividades...
                 </div>
               </div>
             )}
-            {convexOrg && (!recentMessages || recentMessages.length === 0) && (
+            {!evolutionData.isLoading && (!evolutionData.recentMessages || evolutionData.recentMessages.length === 0) && (
               <div className="text-center py-8">
                 <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                 <p className="text-muted-foreground">
@@ -234,8 +231,8 @@ export default function DashboardPage() {
                 </p>
               </div>
             )}
-            {recentMessages?.slice(0, 5).map((message) => {
-              const contact = contacts?.find(c => c._id === message.contactId);
+            {evolutionData.recentMessages?.slice(0, 5).map((message) => {
+              const contact = evolutionData.contacts?.find(c => c._id === message.contactId);
               function formatTimeAgo(timestamp: number) {
                 const diff = Date.now() - timestamp;
                 const minutes = Math.floor(diff / 60000);

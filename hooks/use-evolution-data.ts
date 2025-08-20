@@ -74,70 +74,78 @@ export function useEvolutionData(): DashboardData {
   useEffect(() => {
     const fetchEvolutionData = async () => {
       try {
-        // Fetch real Evolution API stats
-        const response = await fetch('/api/evolution/instance-stats');
+        // Fetch all data in parallel
+        const [statsResponse, messagesResponse, contactsResponse, spinResponse] = await Promise.all([
+          fetch('/api/evolution/instance-stats'),
+          fetch('/api/evolution/messages?period=today&limit=100'),
+          fetch('/api/evolution/contacts?limit=50'),
+          fetch('/api/evolution/spin-analysis?period=week')
+        ]);
+
+        // Get all responses as JSON first
+        const statsData = await statsResponse.json();
+        const messagesData = await messagesResponse.json();
+        const contactsData = await contactsResponse.json();
+        const spinData = await spinResponse.json();
+
+        // Check for API failures and get specific error messages
+        const apiErrors: string[] = [];
         
-        if (!response.ok) {
-          throw new Error('Failed to fetch Evolution data');
+        if (!statsResponse.ok) {
+          apiErrors.push(`Instance Stats: ${statsData.message || 'Failed to load'}`);
         }
-        
-        const stats: EvolutionStats = await response.json();
-        
-        // Transform Evolution data into dashboard format
-        const today = new Date();
-        const todayMessages = Math.floor(stats.totalMessages * 0.1); // Estimate 10% today
-        
-        // Create mock contacts based on real count
-        const contacts = Array.from({ length: stats.totalContacts }, (_, i) => ({
-          _id: `contact-${i + 1}`,
-          name: `Contato ${i + 1}`,
-          channel: "whatsapp",
-          externalId: `55619994${String(49983 + i).padStart(5, '0')}@s.whatsapp.net`,
-          lastMessageAt: Date.now() - (i * 3600000), // Stagger by hours
-          createdAt: Date.now() - (i * 86400000) // Stagger by days
+        if (!messagesResponse.ok || !messagesData.success) {
+          apiErrors.push(`Messages: ${messagesData.message || 'Evolution API indisponível'}`);
+        }
+        if (!contactsResponse.ok || !contactsData.success) {
+          apiErrors.push(`Contacts: ${contactsData.message || 'Evolution API indisponível'}`);
+        }
+        if (!spinResponse.ok || !spinData.success) {
+          apiErrors.push(`SPIN Analysis: ${spinData.message || 'Análise indisponível'}`);
+        }
+
+        // If we have any API errors, show them in the error state
+        const errorMessage = apiErrors.length > 0 ? 
+          `Evolution API com problemas: ${apiErrors.join('; ')}` : 
+          null;
+
+        // Use successful data, defaulting to empty arrays for failed APIs
+        const stats: EvolutionStats = statsResponse.ok ? statsData : {
+          totalMessages: 0, totalContacts: 0, totalChats: 0, 
+          instanceStatus: 'offline', instanceName: 'N/A', 
+          phoneNumber: 'N/A', profileName: 'N/A', lastUpdate: new Date().toISOString()
+        };
+
+        // Use real data from APIs
+        const todayMessages = messagesData.statistics?.total || 0;
+        const recentMessages = messagesData.messages || [];
+        const contacts = contactsData.contacts || [];
+        const spinSessions = spinData.sessions || [];
+
+        // Transform SPIN sessions to match expected format
+        const transformedSessions = spinSessions.map((session: any) => ({
+          id: session.contactId,
+          contactId: session.contactId,
+          status: session.qualified ? "qualified" : "active",
+          stage: "conversation",
+          spinStage: session.currentStage,
+          score: session.score,
+          qualified: session.qualified,
+          lastActivityAt: session.lastActivity,
+          createdAt: session.lastActivity - (24 * 60 * 60 * 1000), // Estimate creation
+          summary: session.summary
         }));
-        
-        // Create mock recent messages
-        const recentMessages = Array.from({ length: Math.min(10, todayMessages) }, (_, i) => ({
-          _id: `message-${i + 1}`,
-          contactId: contacts[i % contacts.length]._id,
-          direction: (i % 3 === 0 ? "inbound" : "outbound") as "inbound" | "outbound",
-          text: i % 3 === 0 
-            ? `Olá! Tenho interesse no seu produto/serviço` 
-            : `Obrigado pelo interesse! Vou te enviar mais informações.`,
-          createdAt: Date.now() - (i * 600000) // Stagger by 10 minutes
-        }));
-        
-        // Create SPIN sessions with realistic data
-        const spinSessions = Array.from({ length: stats.totalChats }, (_, i) => {
-          const stages = ["S", "P", "I", "N"];
-          const spinStage = stages[i % 4];
-          const score = Math.floor(Math.random() * 40) + 60; // 60-100 score
-          
-          return {
-            id: `session-${i + 1}`,
-            contactId: contacts[i % contacts.length]._id,
-            status: "active",
-            stage: "conversation",
-            spinStage,
-            score,
-            qualified: score >= 70,
-            lastActivityAt: Date.now() - (i * 3600000),
-            createdAt: Date.now() - (i * 86400000),
-            summary: spinStage === "N" ? `Lead qualificado com score ${score}` : undefined
-          };
-        });
-        
+
         setData({
-          todayMessages,
+          todayMessages: todayMessages,
           activeContacts: stats.totalContacts,
           activeSessions: stats.totalChats,
           responseTime: 3,
-          spinSessions,
-          contacts,
-          recentMessages,
+          spinSessions: transformedSessions,
+          contacts: contacts,
+          recentMessages: recentMessages,
           isLoading: false,
-          error: null
+          error: errorMessage
         });
         
       } catch (error) {
