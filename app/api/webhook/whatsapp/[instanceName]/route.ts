@@ -14,13 +14,29 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     console.log(`Processing message from ${phoneNumber}: ${messageText}`);
     
     // Find organization by instance name
-    const orgQuery = await convex.query("organizations.getByInstanceName" as any, { 
+    let orgQuery = await convex.query("organizations.getByInstanceName" as any, { 
       instanceName 
     });
     
     if (!orgQuery) {
-      console.log('Organization not found for instance:', instanceName);
-      return;
+      console.log('Organization not found for instance:', instanceName, '- Creating new organization');
+      
+      // Create organization automatically 
+      try {
+        const newOrg = await convex.mutation("organizations.createForInstance" as any, {
+          instanceName: instanceName,
+          name: `Auto-created org for ${instanceName}`,
+          settings: {
+            autoCreated: true,
+            createdFrom: 'webhook'
+          }
+        });
+        orgQuery = newOrg;
+        console.log('Auto-created organization:', orgQuery._id);
+      } catch (createError) {
+        console.error('Error creating organization:', createError);
+        return;
+      }
     }
     
     // Find or create contact
