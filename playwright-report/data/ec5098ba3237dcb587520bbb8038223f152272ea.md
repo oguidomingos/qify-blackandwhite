@@ -18,7 +18,7 @@
   - img
 - text: Don’t have an account?
 - link "Sign up":
-  - /url: https://choice-locust-94.accounts.dev/sign-up?__clerk_db_jwt=dvb_31Z5cERguqb0d8eUJdwxuilhEqL
+  - /url: https://choice-locust-94.accounts.dev/sign-up?__clerk_db_jwt=dvb_31Z8m4GHwcQyG5ktJuwfF5nRvKa
 - paragraph: Secured by
 - link "Clerk logo":
   - /url: https://go.clerk.com/components
