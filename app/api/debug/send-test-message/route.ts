@@ -13,8 +13,8 @@ export async function POST(request: Request) {
     
     console.log(`📤 Sending test message to ${targetNumber}: ${testMessage}`);
     
-    // Updated to Evolution API v2.3.1 format
-    const response = await fetch(`${EVOLUTION_BASE_URL}/message/send-text/${INSTANCE_NAME}`, {
+    // Using original format that worked in previous tests
+    const response = await fetch(`${EVOLUTION_BASE_URL}/message/sendText/${INSTANCE_NAME}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
