@@ -67,7 +67,8 @@ export async function GET(request: Request) {
         { where: { key: { remoteJid: contactId } } } : 
         { where: {} };
       
-      const response = await fetch(`${EVOLUTION_BASE_URL}/chat/findMessages/${INSTANCE_NAME}`, {
+      // Updated to Evolution API v2.3.1 format
+      const response = await fetch(`${EVOLUTION_BASE_URL}/chat/find-messages/${INSTANCE_NAME}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

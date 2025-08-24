@@ -48,8 +48,8 @@ export async function GET(request: Request) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       
-      // Use the correct POST endpoint to get real chats
-      const chatsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findChats/${INSTANCE_NAME}`, {
+      // Updated to Evolution API v2.3.1 format
+      const chatsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/find-chats/${INSTANCE_NAME}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

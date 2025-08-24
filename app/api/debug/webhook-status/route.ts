@@ -8,8 +8,8 @@ export async function GET() {
   try {
     console.log("🔍 Checking webhook configuration...");
     
-    // Try to get webhook configuration
-    const webhookResponse = await fetch(`${EVOLUTION_BASE_URL}/webhook/find/${INSTANCE_NAME}`, {
+    // Updated to Evolution API v2.3.1 format
+    const webhookResponse = await fetch(`${EVOLUTION_BASE_URL}/webhook/get/${INSTANCE_NAME}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -29,8 +29,8 @@ export async function GET() {
       });
     }
 
-    // If webhook find fails, try to get instance info
-    const instanceResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/connectionState/${INSTANCE_NAME}`, {
+    // If webhook get fails, try to get instance info - Updated to v2.3.1 format
+    const instanceResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/connection-state/${INSTANCE_NAME}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -77,6 +77,7 @@ export async function POST() {
     // Force reconfigure webhook
     const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://qify-blackandwhite.vercel.app'}/api/webhook/whatsapp/${INSTANCE_NAME}`;
     
+    // Updated to Evolution API v2.3.1 format
     const response = await fetch(`${EVOLUTION_BASE_URL}/webhook/set/${INSTANCE_NAME}`, {
       method: 'POST',
       headers: {

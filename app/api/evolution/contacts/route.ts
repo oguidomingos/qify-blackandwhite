@@ -27,8 +27,8 @@ export async function GET(request: Request) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       
-      // Use the correct POST endpoint with empty body to get all contacts
-      const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findContacts/${INSTANCE_NAME}`, {
+      // Updated to Evolution API v2.3.1 format
+      const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/find-contacts/${INSTANCE_NAME}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
