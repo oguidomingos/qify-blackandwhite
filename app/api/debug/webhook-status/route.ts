@@ -8,8 +8,8 @@ export async function GET() {
   try {
     console.log("🔍 Checking webhook configuration...");
     
-    // Updated to Evolution API v2.3.1 format
-    const webhookResponse = await fetch(`${EVOLUTION_BASE_URL}/webhook/get/${INSTANCE_NAME}`, {
+    // Try different v2.3.1 webhook route formats
+    const webhookResponse = await fetch(`${EVOLUTION_BASE_URL}/webhook/find/${INSTANCE_NAME}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -29,8 +29,8 @@ export async function GET() {
       });
     }
 
-    // If webhook get fails, try to get instance info - Updated to v2.3.1 format
-    const instanceResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/connection-state/${INSTANCE_NAME}`, {
+    // If webhook fails, try fetchInstances format that worked in build
+    const instanceResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/fetchInstances`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
