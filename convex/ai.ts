@@ -361,16 +361,20 @@ function analyzeCollectedData(userResponses: string[]) {
       info.personType.push(originalResponse);
     }
     
-    // Detect names (simple heuristic) - but exclude business-related responses
-    const namePattern = /^[a-záêçõúíó\s]{2,50}$/i;
-    const excludeWords = /(sim|não|ok|tudo|bem|oi|olá|empresa|negócio|pessoa|física|jurídica|represento|sou|trabalho|atuo)/i;
+    // Detect names (improved heuristic) - but exclude business-related responses
+    const namePattern = /^[a-záêçõúíó\s0-9]{2,50}$/i; // Allow numbers for usernames like "Guigodomingos"
+    const excludeWords = /(^(sim|não|ok|tudo|bem|oi|olá|empresa|negócio|pessoa|física|jurídica|represento|sou|trabalho|atuo|para|minha)$)/i;
+    const businessExcludes = /(marketing|vendas|consultoria|tecnologia|software|agência|iceberg|ltda)/i;
     
     if (namePattern.test(originalResponse) && 
         originalResponse.split(' ').length >= 1 && 
-        originalResponse.split(' ').length <= 5 &&
-        !excludeWords.test(text)) {
+        originalResponse.split(' ').length <= 4 &&
+        originalResponse.length >= 3 && // Minimum 3 characters
+        !excludeWords.test(originalResponse) && // Check full response, not just lowercase
+        !businessExcludes.test(text)) {
       // Additional check: not common greetings or business terms
-      if (!/(ola|oi|tudo|bem|bom|dia|tarde|noite|obrigad)/.test(text)) {
+      if (!/(^(ola|oi|tudo|bem|bom|dia|tarde|noite|obrigad|para|uma)$)/.test(text) &&
+          !/(assessoria|empresa|negocio)/.test(text)) {
         info.name.push(originalResponse);
       }
     }

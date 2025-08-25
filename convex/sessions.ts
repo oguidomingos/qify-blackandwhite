@@ -133,8 +133,9 @@ export const checkAndSetProcessing = mutation({
       .first();
     
     // Use dynamic values or fallback to defaults
-    const PROCESSING_TIMEOUT = aiConfig?.processingTimeoutMs || 30000; // 30 seconds default
-    const COOLDOWN_MS = aiConfig?.cooldownMs || 5000; // 5 seconds default
+    const batchingDelay = aiConfig?.batchingDelayMs || 120000; // 120 seconds default
+    const PROCESSING_TIMEOUT = Math.max(batchingDelay + 30000, 150000); // Batching + 30s buffer
+    const COOLDOWN_MS = Math.max(batchingDelay - 10000, 110000); // Batching - 10s to prevent overlap
     
     const now = Date.now();
     
