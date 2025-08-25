@@ -12,6 +12,9 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
+  env: {
+    PLAYWRIGHT_TEST: 'true',
+  },
   projects: [
     {
       name: 'chromium',
@@ -19,7 +22,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev',
+    command: 'PLAYWRIGHT_TEST=true npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
   },

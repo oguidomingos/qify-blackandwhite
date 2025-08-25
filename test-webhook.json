@@ -1,0 +1,15 @@
+{
+  "event": "messages.upsert",
+  "data": {
+    "key": {
+      "id": "TEST123456789",
+      "remoteJid": "5561936180578@s.whatsapp.net",
+      "fromMe": false
+    },
+    "message": {
+      "conversation": "Ola! Sou um lead interessado"
+    },
+    "messageTimestamp": 1724614075,
+    "pushName": "Lead Teste"
+  }
+}

@@ -2,6 +2,50 @@ import { v } from "convex/values";
 import { action, internalAction, internalQuery, mutation, internalMutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 
+// Helper function to get working instances from Evolution API
+async function getWorkingInstances(): Promise<string[]> {
+  try {
+    const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL;
+    const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+    
+    if (!EVOLUTION_BASE_URL || !EVOLUTION_API_KEY) {
+      console.log("Evolution API credentials not configured");
+      return [];
+    }
+
+    const response = await fetch(`${EVOLUTION_BASE_URL}/instance/fetchInstances`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': EVOLUTION_API_KEY
+      },
+      timeout: 10000
+    });
+
+    if (response.ok) {
+      const instances = await response.json();
+      console.log(`📋 Found ${instances.length} total instances in Evolution API`);
+      
+      // Filter for open/connected instances that start with 'qify-'
+      const workingInstances = instances
+        .filter((instance: any) => 
+          instance.connectionStatus?.state === 'open' && 
+          (instance.instanceName || instance.name || '').startsWith('qify-')
+        )
+        .map((instance: any) => instance.instanceName || instance.name);
+
+      console.log(`✅ Working Qify instances: ${workingInstances.join(', ')}`);
+      return workingInstances;
+    }
+    
+    console.log("Failed to fetch instances from Evolution API");
+    return [];
+  } catch (error) {
+    console.error('🚨 Error getting working instances:', error);
+    return [];
+  }
+}
+
 export const sendMessage = internalAction({
   args: {
     orgId: v.id("organizations"),
@@ -40,13 +84,14 @@ export const sendMessage = internalAction({
       };
     }
 
-    // Implement retry mechanism for Evolution API stability
+    // Try sending with the primary account first, then fallback to working instances
     const maxRetries = 3;
     const retryDelay = 1000; // 1 second
     
+    // First, try with the configured account
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`Sending message attempt ${attempt}/${maxRetries}`);
+        console.log(`Sending message via primary account attempt ${attempt}/${maxRetries}`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -77,18 +122,20 @@ export const sendMessage = internalAction({
             }
           }
           
-          throw error;
+          // If not retryable or final attempt, break to try fallback instances
+          console.log(`Primary account failed: ${error.message}. Will try fallback instances.`);
+          break;
         }
 
         const result = await response.json();
         
         // Log successful send
-        console.log(`Message sent successfully on attempt ${attempt}:`, result);
+        console.log(`Message sent successfully via primary account on attempt ${attempt}:`, result);
         
         return result;
         
       } catch (error) {
-        console.error(`Error sending WhatsApp message (attempt ${attempt}/${maxRetries}):`, error);
+        console.error(`Error sending WhatsApp message via primary account (attempt ${attempt}/${maxRetries}):`, error);
         
         // Check if it's a retryable error
         const isRetryable = error.message.includes('Connection Closed') || 
@@ -102,10 +149,59 @@ export const sendMessage = internalAction({
           continue; // Retry
         }
         
-        // Last attempt or non-retryable error
-        throw error;
+        console.log(`Primary account ultimately failed. Will try fallback instances.`);
+        break;
       }
     }
+
+    // If primary account failed, try fallback instances
+    console.log('🔄 Primary instance failed, trying fallback instances...');
+    const workingInstances = await getWorkingInstances();
+    
+    if (workingInstances.length === 0) {
+      throw new Error('No working instances available for message sending');
+    }
+
+    // Try each working instance
+    for (const instanceName of workingInstances) {
+      if (instanceName === account.instanceId) {
+        console.log(`Skipping ${instanceName} (already tried as primary)`);
+        continue; // Skip the primary instance we already tried
+      }
+      
+      try {
+        console.log(`📤 Trying fallback instance: ${instanceName}`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(`${account.baseUrl}/message/sendText/${instanceName}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": account.token,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log(`✅ Message sent successfully via fallback instance ${instanceName}:`, result);
+          return result;
+        }
+
+        const errorText = await response.text();
+        console.log(`❌ Fallback instance ${instanceName} failed: ${response.status} - ${errorText}`);
+        
+      } catch (error) {
+        console.error(`🚨 Error with fallback instance ${instanceName}:`, error);
+      }
+    }
+    
+    throw new Error('All instances failed to send message. Evolution API may be unstable.');
   },
 });
 

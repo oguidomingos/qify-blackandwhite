@@ -27,16 +27,47 @@ export async function GET(request: Request) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       
-      // Updated to Evolution API v2.3.1 format
-      const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/find-contacts/${INSTANCE_NAME}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': EVOLUTION_API_KEY!
-        },
-        body: JSON.stringify({}),
-        signal: controller.signal
-      });
+      // Try multiple Evolution API endpoint formats (v2.3.1 compatibility)
+      const endpoints = [
+        `/chat/findContacts/${INSTANCE_NAME}`,
+        `/contact/findAll/${INSTANCE_NAME}`,
+        `/chat/find-contacts/${INSTANCE_NAME}`,
+        `/instance/fetchContacts/${INSTANCE_NAME}`
+      ];
+      
+      let contactsResponse: Response | null = null;
+      let lastError: Error | null = null;
+      
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`🔍 Trying contacts endpoint: ${endpoint}`);
+          
+          contactsResponse = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': EVOLUTION_API_KEY!
+            },
+            body: JSON.stringify({}),
+            signal: controller.signal
+          });
+          
+          if (contactsResponse.ok) {
+            console.log(`✅ Contacts endpoint working: ${endpoint}`);
+            break;
+          } else {
+            console.log(`❌ Endpoint ${endpoint} returned: ${contactsResponse.status}`);
+            lastError = new Error(`${endpoint}: ${contactsResponse.status}`);
+          }
+        } catch (error) {
+          console.log(`🚨 Error with endpoint ${endpoint}:`, error);
+          lastError = error instanceof Error ? error : new Error(`Failed: ${endpoint}`);
+        }
+      }
+      
+      if (!contactsResponse || !contactsResponse.ok) {
+        throw lastError || new Error('All contact endpoints failed');
+      }
 
       clearTimeout(timeoutId);
 

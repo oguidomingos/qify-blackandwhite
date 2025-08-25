@@ -196,10 +196,12 @@ export const upsertFromEvolution = mutation({
         orgId,
         contactId: contact._id,
         status: "active",
-        spinStage: "S", // Default SPIN stage
-        totalMessages: 0,
-        lastMessageAt: Date.now(),
-        createdAt: Date.now()
+        stage: "S", // Default SPIN stage  
+        variables: {},
+        lastActivityAt: Date.now(),
+        createdAt: Date.now(),
+        processingLock: false,
+        lastProcessedAt: 0
       });
       session = await ctx.db.get(sessionId);
     }
@@ -234,8 +236,7 @@ export const upsertFromEvolution = mutation({
       .collect();
     
     await ctx.db.patch(session._id, {
-      totalMessages: sessionMessages.length + 1,
-      lastMessageAt: messageData.createdAt
+      lastActivityAt: messageData.createdAt
     });
     
     // Update contact

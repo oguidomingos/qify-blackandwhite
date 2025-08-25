@@ -84,6 +84,7 @@ export const create = mutation({
     contactId: v.id("contacts"),
     orgId: v.id("organizations"),
     status: v.string(),
+    channel: v.optional(v.string()),
     spinStage: v.optional(v.string()),
     totalMessages: v.optional(v.number()),
     lastMessageAt: v.optional(v.number())
@@ -94,12 +95,9 @@ export const create = mutation({
       orgId: args.orgId,
       contactId: args.contactId,
       stage: args.spinStage || "S", // Default SPIN stage
-      spinStage: args.spinStage || "S",
       status: args.status,
-      totalMessages: args.totalMessages || 0,
       variables: {},
       lastActivityAt: args.lastMessageAt || now,
-      lastMessageAt: args.lastMessageAt || now,
       createdAt: now,
       processingLock: false,
       lastProcessedAt: 0

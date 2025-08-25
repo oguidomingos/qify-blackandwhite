@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { ConvexHttpClient } from "convex/browser";
+import { api } from "@/convex/_generated/api";
 
 // Initialize Convex client
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -14,7 +15,7 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     console.log(`Processing message from ${phoneNumber}: ${messageText}`);
     
     // Find organization by instance name
-    let orgQuery = await convex.query("organizations.getByInstanceName" as any, { 
+    let orgQuery = await convex.query(api.organizations.getByInstanceName, { 
       instanceName 
     });
     
@@ -23,7 +24,7 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
       
       // Create organization automatically 
       try {
-        const newOrg = await convex.mutation("organizations.createForInstance" as any, {
+        const newOrg = await convex.mutation(api.organizations.createForInstance, {
           instanceName: instanceName,
           name: `Auto-created org for ${instanceName}`,
           settings: {
@@ -40,13 +41,13 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     }
     
     // Find or create contact
-    let contact = await convex.query("contacts.getByExternalId" as any, {
+    let contact = await convex.query(api.contacts.getByExternalId, {
       externalId: key.remoteJid,
       orgId: orgQuery._id
     });
     
     if (!contact) {
-      const contactId = await convex.mutation("contacts.create" as any, {
+      const contactId = await convex.mutation(api.contacts.create, {
         orgId: orgQuery._id,
         name: pushName || 'Unknown',
         channel: 'whatsapp',
@@ -58,15 +59,14 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     console.log('Contact found/created:', contact._id);
     
     // Find or create session
-    let session = await convex.query("sessions.getActiveByContact" as any, {
+    let session = await convex.query(api.sessions.getActiveByContact, {
       contactId: contact._id
     });
     
     if (!session) {
-      const sessionId = await convex.mutation("sessions.create" as any, {
+      const sessionId = await convex.mutation(api.sessions.create, {
         contactId: contact._id,
         orgId: orgQuery._id,
-        channel: 'whatsapp',
         status: 'active'
       });
       session = { _id: sessionId };
@@ -75,7 +75,7 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     console.log('Session found/created:', session._id);
     
     // Save incoming message
-    const savedMessage = await convex.mutation("messages.create" as any, {
+    const savedMessage = await convex.mutation(api.messages.create, {
       sessionId: session._id,
       contactId: contact._id,
       orgId: orgQuery._id,
@@ -94,7 +94,7 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     // Trigger AI processing immediately - let AI function handle batching
     console.log('Triggering AI processing for session:', session._id);
     try {
-      await convex.action("ai.generateAiReply" as any, {
+      await convex.action(api.ai.generateAiReply, {
         orgId: orgQuery._id,
         sessionId: session._id
       });

@@ -75,7 +75,7 @@ export async function POST() {
     console.log("🔄 Forcing webhook reconfiguration...");
     
     // Force reconfigure webhook with current deployment URL
-    const webhookUrl = `https://qify-blackandwhite-h70s9bxr1-oguidomingos-projects.vercel.app/api/webhook/whatsapp/${INSTANCE_NAME}`;
+    const webhookUrl = `https://qify-blackandwhite-ltr4iresn-oguidomingos-projects.vercel.app/api/webhook/whatsapp/${INSTANCE_NAME}`;
     
     // Updated to Evolution API v2.3.1 format
     const response = await fetch(`${EVOLUTION_BASE_URL}/webhook/set/${INSTANCE_NAME}`, {
