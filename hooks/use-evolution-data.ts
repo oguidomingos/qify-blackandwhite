@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useOrganization, useUser } from "@clerk/nextjs";
 
 interface EvolutionStats {
   totalMessages: number;
@@ -59,111 +62,87 @@ interface DashboardData {
 }
 
 export function useEvolutionData(): DashboardData {
-  const [data, setData] = useState<DashboardData>({
-    todayMessages: 0,
-    activeContacts: 0,
-    activeSessions: 0,
-    responseTime: 3,
-    spinSessions: [],
-    contacts: [],
-    recentMessages: [],
-    isLoading: true,
-    error: null
+  const { organization } = useOrganization();
+  const { user } = useUser();
+  
+  // Get organization from Convex
+  const orgQuery = useQuery(api.organizations.getByClerkId, {
+    clerkId: organization?.id || user?.id || ""
   });
 
-  useEffect(() => {
-    const fetchEvolutionData = async () => {
-      try {
-        // Fetch all data in parallel
-        const [statsResponse, messagesResponse, contactsResponse, spinResponse] = await Promise.all([
-          fetch('/api/evolution/instance-stats'),
-          fetch('/api/evolution/messages?period=today&limit=100'),
-          fetch('/api/evolution/contacts?limit=50'),
-          fetch('/api/evolution/spin-analysis?period=week')
-        ]);
+  // Get real data from Convex
+  const contactsQuery = useQuery(orgQuery ? api.contacts.listByOrg : "skip", {
+    orgId: orgQuery?._id
+  });
+  
+  const messagesQueryResult = useQuery(orgQuery ? api.messages.listRecent : "skip", {
+    orgId: orgQuery?._id,
+    limit: 50
+  });
+  
+  const messages = messagesQueryResult?.messages || [];
+  
+  const sessionsQuery = useQuery(orgQuery ? api.sessions.listByOrg : "skip", {
+    orgId: orgQuery?._id
+  });
+  
+  const spinSessionsQuery = useQuery(orgQuery ? api.sessions.listSpin : "skip", {
+    orgId: orgQuery?._id
+  });
 
-        // Get all responses as JSON first
-        const statsData = await statsResponse.json();
-        const messagesData = await messagesResponse.json();
-        const contactsData = await contactsResponse.json();
-        const spinData = await spinResponse.json();
+  // Calculate derived data
+  const contacts = contactsQuery || [];
+  const sessions = sessionsQuery || [];
+  const spinSessions = spinSessionsQuery || [];
 
-        // Check for API failures and get specific error messages
-        const apiErrors: string[] = [];
-        
-        if (!statsResponse.ok) {
-          apiErrors.push(`Instance Stats: ${statsData.message || 'Failed to load'}`);
-        }
-        if (!messagesResponse.ok || !messagesData.success) {
-          apiErrors.push(`Messages: ${messagesData.message || 'Evolution API indisponível'}`);
-        }
-        if (!contactsResponse.ok || !contactsData.success) {
-          apiErrors.push(`Contacts: ${contactsData.message || 'Evolution API indisponível'}`);
-        }
-        if (!spinResponse.ok || !spinData.success) {
-          apiErrors.push(`SPIN Analysis: ${spinData.message || 'Análise indisponível'}`);
-        }
+  // Today's messages
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMessages = messages.filter(msg => 
+    msg.createdAt >= today.getTime()
+  ).length;
 
-        // If we have any API errors, show them in the error state
-        const errorMessage = apiErrors.length > 0 ? 
-          `Evolution API com problemas: ${apiErrors.join('; ')}` : 
-          null;
+  // Active contacts (with messages in last 24h)
+  const yesterday = Date.now() - (24 * 60 * 60 * 1000);
+  const activeContacts = contacts.filter(contact => 
+    messages.some(msg => 
+      msg.contactId === contact._id && msg.createdAt >= yesterday
+    )
+  ).length;
 
-        // Use successful data, defaulting to empty arrays for failed APIs
-        const stats: EvolutionStats = statsResponse.ok ? statsData : {
-          totalMessages: 0, totalContacts: 0, totalChats: 0, 
-          instanceStatus: 'offline', instanceName: 'N/A', 
-          phoneNumber: 'N/A', profileName: 'N/A', lastUpdate: new Date().toISOString()
-        };
+  // Active sessions
+  const activeSessions = sessions.filter(session => 
+    session.status === 'active'
+  ).length;
 
-        // Use real data from APIs
-        const todayMessages = messagesData.statistics?.total || 0;
-        const recentMessages = messagesData.messages || [];
-        const contacts = contactsData.contacts || [];
-        const spinSessions = spinData.sessions || [];
+  // Transform messages to expected format
+  const recentMessages = messages.slice(0, 20).map(msg => ({
+    _id: msg._id,
+    contactId: msg.contactId,
+    direction: msg.direction as "inbound" | "outbound",
+    text: msg.text,
+    createdAt: msg.createdAt
+  }));
 
-        // Transform SPIN sessions to match expected format
-        const transformedSessions = spinSessions.map((session: any) => ({
-          id: session.contactId,
-          contactId: session.contactId,
-          status: session.qualified ? "qualified" : "active",
-          stage: "conversation",
-          spinStage: session.currentStage,
-          score: session.score,
-          qualified: session.qualified,
-          lastActivityAt: session.lastActivity,
-          createdAt: session.lastActivity - (24 * 60 * 60 * 1000), // Estimate creation
-          summary: session.summary
-        }));
+  // Check loading states
+  const isLoading = orgQuery === undefined || 
+                   contactsQuery === undefined || 
+                   messagesQueryResult === undefined || 
+                   sessionsQuery === undefined ||
+                   spinSessionsQuery === undefined;
 
-        setData({
-          todayMessages: todayMessages,
-          activeContacts: stats.totalContacts,
-          activeSessions: stats.totalChats,
-          responseTime: 3,
-          spinSessions: transformedSessions,
-          contacts: contacts,
-          recentMessages: recentMessages,
-          isLoading: false,
-          error: errorMessage
-        });
-        
-      } catch (error) {
-        console.error("Error fetching Evolution data:", error);
-        setData(prev => ({
-          ...prev,
-          isLoading: false,
-          error: error instanceof Error ? error.message : "Unknown error"
-        }));
-      }
-    };
+  const error = !isLoading && !orgQuery ? 
+    "Organização não encontrada. Faça o onboarding primeiro." : null;
 
-    fetchEvolutionData();
-    
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchEvolutionData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return data;
+  return {
+    todayMessages,
+    activeContacts,
+    activeSessions,
+    responseTime: 3,
+    spinSessions: spinSessions || [],
+    contacts: contacts || [],
+    recentMessages,
+    isLoading,
+    error
+  };
 }

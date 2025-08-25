@@ -91,16 +91,16 @@ async function processWhatsAppMessage(instanceName: string, messageData: any) {
     
     console.log('Message saved:', savedMessage._id);
     
-    // Trigger AI processing immediately - let AI function handle batching
-    console.log('Triggering AI processing for session:', session._id);
+    // Schedule AI processing with batching logic - AI function handles the delay
+    console.log('Scheduling AI processing for session:', session._id);
     try {
-      await convex.action(api.ai.generateAiReply, {
+      const aiResult = await convex.action(api.ai.generateAiReply, {
         orgId: orgQuery._id,
         sessionId: session._id
       });
-      console.log('AI processing triggered for session:', session._id);
+      console.log('AI processing scheduled:', aiResult);
     } catch (error) {
-      console.error('Error triggering AI processing:', error);
+      console.error('Error scheduling AI processing:', error);
     }
     
     return { success: true, sessionId: session._id, messageId: savedMessage._id };

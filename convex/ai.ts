@@ -26,17 +26,94 @@ export const generateAiReply = action({
       
       console.log(`AI Config for orgId ${orgId}:`, aiConfig);
       
-      const batchingDelay = aiConfig?.batchingDelayMs || 3000;
+      // Use configurable batching delay (default 120 seconds as specified)
+      const batchingDelay = aiConfig?.batchingDelayMs || 120000;
       
-      // Wait for potential additional messages (dynamic batching delay)
-      console.log(`Waiting ${batchingDelay/1000} seconds for message batching...`);
-      await new Promise(resolve => setTimeout(resolve, batchingDelay));
+      // Schedule AI processing with proper batching delay
+      console.log(`Scheduling AI processing in ${batchingDelay/1000} seconds for session ${sessionId}`);
+      
+      // Use Convex scheduler for serverless-compatible batching
+      await ctx.scheduler.runAfter(batchingDelay, internal.ai.processScheduledReply, {
+        orgId,
+        sessionId,
+        scheduledAt: Date.now()
+      });
+      
+      return { 
+        success: true, 
+        scheduled: true, 
+        scheduledIn: batchingDelay,
+        message: `AI processing scheduled for ${batchingDelay/1000}s from now`
+      };
 
-      // Get session data
+    } catch (error) {
+      console.error("Error scheduling AI reply:", error);
+      
+      // Reset processing lock on error
+      try {
+        await ctx.runMutation(internal.sessions.resetProcessing, {
+          sessionId
+        });
+      } catch (resetError) {
+        console.error("Error resetting processing lock:", resetError);
+      }
+      
+      throw error;
+    }
+  },
+});
+
+// Scheduled function that executes the actual AI processing after batching delay
+export const processScheduledReply = internalAction({
+  args: {
+    orgId: v.id("organizations"),
+    sessionId: v.id("sessions"),
+    scheduledAt: v.number(),
+  },
+  handler: async (ctx: any, { orgId, sessionId, scheduledAt }: any) => {
+    try {
+      console.log(`Processing scheduled AI reply for session ${sessionId} (scheduled at ${new Date(scheduledAt)})`);
+
+      // Check if session is still valid and not already processed
       const session = await ctx.runQuery(internal.sessions.getById, { sessionId });
       if (!session) {
-        throw new Error("Session not found");
+        console.log(`Session ${sessionId} no longer exists, skipping AI processing`);
+        return { skipped: true, reason: "session_not_found" };
       }
+
+      // Check if there have been newer messages since scheduling
+      const newerMessages = await ctx.runQuery(internal.messages.listBySession, { 
+        sessionId,
+        limit: 1,
+      });
+
+      if (newerMessages.length > 0 && newerMessages[0].createdAt > scheduledAt) {
+        console.log(`Newer message found since scheduling, rescheduling AI processing for session ${sessionId}`);
+        
+        // Get AI configurations for new batching delay
+        const aiConfig = await ctx.runQuery("aiConfigurations:getByOrg", {
+          orgId
+        });
+        const batchingDelay = aiConfig?.batchingDelayMs || 120000;
+        
+        // Schedule again with fresh delay
+        await ctx.scheduler.runAfter(batchingDelay, internal.ai.processScheduledReply, {
+          orgId,
+          sessionId,
+          scheduledAt: Date.now()
+        });
+        
+        return { 
+          rescheduled: true, 
+          newDelay: batchingDelay,
+          reason: "newer_messages_found"
+        };
+      }
+
+      // Get AI configurations for context
+      const aiConfig = await ctx.runQuery("aiConfigurations:getByOrg", {
+        orgId
+      });
 
       // Get messages for context (dynamic limit from config)
       const maxMessages = aiConfig?.maxMessagesContext || 20;
@@ -48,7 +125,7 @@ export const generateAiReply = action({
       // Reverse to chronological order for proper context building
       const messages = messagesDesc.reverse();
 
-      console.log(`Processing AI reply for session ${sessionId} with ${messages.length} messages in context (most recent: "${messages[messages.length - 1]?.text || 'none'}")`);
+      console.log(`Processing AI reply for session ${sessionId} with ${messages.length} messages in context`);
 
       // Get full prompt (system message + user methodology)
       const promptData = await ctx.runQuery("aiPrompts:getFullPrompt", {
@@ -109,8 +186,14 @@ export const generateAiReply = action({
       
       console.log(`AI reply completed for session ${sessionId}: "${response.substring(0, 100)}..."`);
 
+      return {
+        success: true,
+        response: response.substring(0, 100) + "...",
+        messagesProcessed: messages.length
+      };
+
     } catch (error) {
-      console.error("Error generating AI reply:", error);
+      console.error("Error processing scheduled AI reply:", error);
       
       // Reset processing lock on error
       try {

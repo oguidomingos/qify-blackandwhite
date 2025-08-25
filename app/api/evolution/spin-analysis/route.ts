@@ -1,10 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "@/convex/_generated/api";
+import { auth } from "@clerk/nextjs/server";
 
 export const dynamic = 'force-dynamic';
 
-const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL;
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
-const INSTANCE_NAME = "qify-5561999449983";
+// Initialize Convex client
+const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 interface SPINPatterns {
   S: string[]; // Situation
@@ -140,33 +142,48 @@ function calculateSPINScore(stageProgression: SPINSession['stageProgression'], t
 }
 
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const contactId = searchParams.get('contactId');
     const period = searchParams.get('period') || 'week';
 
-    console.log('🎯 SPIN Analysis - Starting...', { contactId, period });
+    console.log('🎯 SPIN Analysis - Starting with Convex data...', { contactId, period });
 
-    let messagesUrl = `/api/evolution/messages?period=${period}&limit=200`;
-    if (contactId) {
-      messagesUrl += `&contactId=${contactId}`;
+    // Get authentication
+    const { userId, orgId } = await auth();
+    
+    if (!userId) {
+      return NextResponse.json({ 
+        success: false, 
+        message: "Usuário não autenticado" 
+      }, { status: 401 });
     }
 
-    console.log('📞 Fetching messages from:', messagesUrl);
+    // Get organization from Convex
+    const organization = await convex.query(api.organizations.getByClerkId, {
+      clerkId: orgId || userId
+    });
 
-    try {
-      // Fetch messages from our messages API
-      const messagesResponse = await fetch(`${request.url.split('/api')[0]}${messagesUrl}`);
-      
-      console.log('📊 Messages response status:', messagesResponse.status);
-      
-      if (!messagesResponse.ok) {
-        throw new Error(`Failed to fetch messages: ${messagesResponse.status}`);
-      }
+    if (!organization) {
+      return NextResponse.json({
+        success: false,
+        message: "Organização não encontrada. Complete o onboarding primeiro."
+      }, { status: 404 });
+    }
 
-      const messagesData = await messagesResponse.json();
-    const messages = messagesData.messages || [];
+    // Get messages from Convex
+    const messagesResult = await convex.query(api.messages.listRecent, {
+      orgId: organization._id,
+      limit: 200
+    });
+    
+    const messages = messagesResult.messages || [];
+
+    // Get contacts for names
+    const contacts = await convex.query(api.contacts.listByOrg, {
+      orgId: organization._id
+    });
 
     // Group messages by contact
     const contactMessages: { [key: string]: AnalyzedMessage[] } = {};
@@ -220,8 +237,8 @@ export async function GET(request: Request) {
       const score = calculateSPINScore(stageProgression, totalMessages);
       const qualified = score >= 70 && currentStage === 'N';
       const lastActivity = Math.max(...sortedMessages.map(m => m.timestamp));
-      const contactName = messages.find((m: any) => m.contactId === contactId)?.senderName || 
-                         contactId.split('@')[0] || 'Contato Desconhecido';
+      const contact = contacts.find((c: any) => c._id === contactId);
+      const contactName = contact?.name || 'Contato Desconhecido';
 
       // Generate summary
       let summary = `Contato em estágio ${currentStage}`;
@@ -275,52 +292,19 @@ export async function GET(request: Request) {
         Math.round(spinSessions.reduce((sum, s) => sum + s.score, 0) / spinSessions.length) : 0
     };
 
-      console.log('✅ Real SPIN analysis completed:', spinSessions.length, 'sessions');
-      
-      return NextResponse.json({
-        success: true,
-        sessions: spinSessions,
-        statistics,
-        period,
-        fallback: false
-      });
-
-    } catch (apiError) {
-      console.log('🚨 SPIN Analysis failed - Messages API unavailable:', apiError);
-      
-      // Return clear error when messages API fails
-      const errorMessage = apiError instanceof Error ? apiError.message : "Messages API unavailable";
-      
-      if (contactId) {
-        return NextResponse.json({
-          success: false,
-          session: null,
-          contactId,
-          error: errorMessage,
-          message: "Análise SPIN indisponível - Mensagens não acessíveis"
-        }, { status: 503 });
-      }
-
-      return NextResponse.json({
-        success: false,
-        sessions: [],
-        statistics: {
-          totalSessions: 0,
-          qualified: 0,
-          stageDistribution: { S: 0, P: 0, I: 0, N: 0 },
-          averageScore: 0
-        },
-        period,
-        fallback: false,
-        error: errorMessage,
-        message: "Análise SPIN indisponível - API de mensagens offline"
-      }, { status: 503 });
-    }
+    console.log('✅ SPIN analysis completed with Convex data:', spinSessions.length, 'sessions');
+    
+    return NextResponse.json({
+      success: true,
+      sessions: spinSessions,
+      statistics,
+      period,
+      message: `Análise SPIN de ${spinSessions.length} sessões concluída`
+    });
 
   } catch (error) {
-    console.error("🚨 SPIN analysis critical error:", error);
+    console.error("🚨 SPIN analysis error:", error);
     
-    // Return clear system error
     return NextResponse.json({
       success: false,
       sessions: [],
@@ -330,10 +314,8 @@ export async function GET(request: Request) {
         stageDistribution: { S: 0, P: 0, I: 0, N: 0 },
         averageScore: 0
       },
-      period: searchParams.get('period') || 'all',
-      fallback: false,
       error: error instanceof Error ? error.message : "Sistema indisponível",
-      message: "Erro crítico na análise SPIN - Entre em contato com suporte"
+      message: "Erro na análise SPIN - Verifique se há dados suficientes"
     }, { status: 500 });
   }
 }

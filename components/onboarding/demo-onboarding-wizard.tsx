@@ -86,6 +86,8 @@ export default function DemoOnboardingWizard() {
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [instanceStatus, setInstanceStatus] = useState<string>('disconnected');
   const [formData, setFormData] = useState({
     businessName: "",
     niche: "",
@@ -171,6 +173,41 @@ export default function DemoOnboardingWizard() {
               workDays: ["mon", "tue", "wed", "thu", "fri"]
             }
           });
+          
+          // Create WhatsApp instance in Evolution API
+          try {
+            console.log('Creating WhatsApp instance for:', formData.phoneNumber);
+            const instanceResponse = await fetch('/api/whatsapp/create-instance', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                phoneNumber: formData.phoneNumber,
+                instanceName: `qify-${formData.phoneNumber.replace(/[^\d]/g, '')}`
+              })
+            });
+            
+            if (instanceResponse.ok) {
+              const instanceData = await instanceResponse.json();
+              console.log('WhatsApp instance created successfully:', instanceData);
+              
+              // Get QR code after creating instance
+              const instanceName = `qify-${formData.phoneNumber.replace(/[^\d]/g, '')}`;
+              const qrResponse = await fetch(`/api/evolution/instance/qr?instanceName=${instanceName}`);
+              
+              if (qrResponse.ok) {
+                const qrData = await qrResponse.json();
+                if (qrData.qrcode) {
+                  setQrCodeUrl(qrData.qrcode);
+                  setInstanceStatus('created');
+                }
+              }
+            } else {
+              console.warn('Failed to create WhatsApp instance, will be created automatically on webhook');
+            }
+          } catch (instanceError) {
+            console.warn('Error creating WhatsApp instance:', instanceError);
+            // Don't fail onboarding if instance creation fails - it can be created later
+          }
           break;
       }
       
@@ -433,8 +470,26 @@ export default function DemoOnboardingWizard() {
                   }
                 }}
               >
-                {isSaving ? "Salvando..." : "Configurar WhatsApp"}
+                {isSaving ? "Salvando..." : qrCodeUrl ? "Conectar WhatsApp" : "Configurar WhatsApp"}
               </Button>
+              
+              {/* QR Code Section */}
+              {qrCodeUrl && (
+                <div className="mt-6 p-4 rounded-lg bg-green-900/20 border border-green-700">
+                  <h4 className="text-green-400 font-medium mb-3">📱 Conecte seu WhatsApp</h4>
+                  <div className="flex flex-col items-center space-y-3">
+                    <div className="bg-white p-4 rounded-lg">
+                      <img src={qrCodeUrl} alt="QR Code WhatsApp" className="w-48 h-48" />
+                    </div>
+                    <div className="text-sm text-slate-300 text-center">
+                      <p className="mb-2">1. Abra o WhatsApp no seu celular</p>
+                      <p className="mb-2">2. Toque em ⋯ ou Configurações</p>
+                      <p className="mb-2">3. Toque em WhatsApp Web</p>
+                      <p>4. Escaneie este código QR</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
