@@ -40,31 +40,71 @@ export const sendMessage = internalAction({
       };
     }
 
-    try {
-      const response = await fetch(`${account.baseUrl}/message/sendText/${account.instanceId}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": account.token,
-        },
-        body: JSON.stringify(payload),
-      });
+    // Implement retry mechanism for Evolution API stability
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1 second
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Sending message attempt ${attempt}/${maxRetries}`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const response = await fetch(`${account.baseUrl}/message/sendText/${account.instanceId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": account.token,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`WhatsApp API error (${response.status}): ${errorText}`);
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          const error = new Error(`WhatsApp API error (${response.status}): ${errorText}`);
+          
+          // Check if it's a retryable error
+          if (response.status >= 500 || response.status === 429 || errorText.includes('Connection Closed')) {
+            console.log(`Retryable error on attempt ${attempt}: ${error.message}`);
+            if (attempt < maxRetries) {
+              console.log(`Waiting ${retryDelay}ms before retry...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              continue; // Retry
+            }
+          }
+          
+          throw error;
+        }
+
+        const result = await response.json();
+        
+        // Log successful send
+        console.log(`Message sent successfully on attempt ${attempt}:`, result);
+        
+        return result;
+        
+      } catch (error) {
+        console.error(`Error sending WhatsApp message (attempt ${attempt}/${maxRetries}):`, error);
+        
+        // Check if it's a retryable error
+        const isRetryable = error.message.includes('Connection Closed') || 
+                           error.message.includes('timeout') ||
+                           error.message.includes('ECONNRESET') ||
+                           error.message.includes('Internal Server Error');
+        
+        if (isRetryable && attempt < maxRetries) {
+          console.log(`Retrying in ${retryDelay}ms... (${maxRetries - attempt} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          continue; // Retry
+        }
+        
+        // Last attempt or non-retryable error
+        throw error;
       }
-
-      const result = await response.json();
-      
-      // Log successful send
-      console.log("Message sent successfully:", result);
-      
-      return result;
-      
-    } catch (error) {
-      console.error("Error sending WhatsApp message:", error);
-      throw error;
     }
   },
 });

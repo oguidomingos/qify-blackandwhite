@@ -146,14 +146,46 @@ export async function POST(
       }
     }
 
-    // Validate JSON payload
+    // Validate JSON payload with robust handling for special characters
     let payload;
     try {
+      // Log raw data for debugging
+      console.log('Raw webhook data length:', raw.length);
+      console.log('Raw webhook data preview:', raw.substring(0, 200));
+      
+      // Try parsing the JSON
       payload = JSON.parse(raw);
+      
+      // Sanitize text content if present
+      if (payload.data?.message?.conversation) {
+        const originalText = payload.data.message.conversation;
+        // Log original text for debugging
+        console.log('Original message text:', originalText);
+        
+        // Clean up any problematic characters but preserve Portuguese
+        const cleanedText = originalText
+          .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '') // Remove control characters
+          .trim();
+        
+        payload.data.message.conversation = cleanedText;
+        console.log('Cleaned message text:', cleanedText);
+      }
     } catch (error) {
-      console.error("Invalid JSON payload:", error);
+      console.error("JSON parsing error:", error);
+      console.error("Raw data that failed parsing:", raw);
+      
+      // Try to identify the problematic character
+      const match = error.message.match(/position (\d+)/);
+      if (match) {
+        const pos = parseInt(match[1]);
+        const surrounding = raw.substring(Math.max(0, pos - 10), pos + 10);
+        console.error(`Problematic text around position ${pos}:`, surrounding);
+      }
+      
       return NextResponse.json({ 
-        error: "Invalid JSON payload" 
+        error: "Invalid JSON payload",
+        details: error.message,
+        position: match ? parseInt(match[1]) : null
       }, { status: 400 });
     }
 
@@ -161,13 +193,19 @@ export async function POST(
       instanceName,
       event: payload.event,
       hasData: !!payload.data,
-      payload: payload
+      messageText: payload.data?.message?.conversation || null,
+      pushName: payload.data?.pushName || null
     });
 
     // Process different types of events
     switch (payload.event) {
       case "messages.upsert":
-        console.log(`New message for instance ${instanceName}:`, payload.data);
+        console.log(`New message for instance ${instanceName}:`, {
+          from: payload.data.key?.remoteJid,
+          text: payload.data.message?.conversation,
+          pushName: payload.data.pushName,
+          timestamp: payload.data.messageTimestamp
+        });
         
         // Process incoming message through agent
         try {
