@@ -5,7 +5,7 @@ const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
-const INSTANCE_NAME = "qify-5561999449983";
+const INSTANCE_NAME = "roigem";
 
 interface EvolutionMessage {
   key: {

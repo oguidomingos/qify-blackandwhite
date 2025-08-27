@@ -158,7 +158,13 @@ export const processScheduledReplyWithRedis = internalAction({
         const sessionState = await sessionManager.getState();
         const promptData = await ctx.runQuery("aiPrompts:getFullPromptWithSubstitution", { 
           orgId,
-          sessionState,
+          sessionState: {
+            stage: sessionState.stage,
+            asked: Array.from(sessionState.asked),
+            answered: Array.from(sessionState.answered),
+            facts: sessionState.facts,
+            lastUserTs: sessionState.lastUserTs
+          },
           currentStage: sessionState.stage,
           facts: sessionState.facts,
           askedQuestions: Array.from(sessionState.asked),
@@ -869,7 +875,6 @@ function buildEnhancedSpinConversationWithRedis(
   // Add analysis and guidelines
   contextualPrompt += `\n**ANÁLISE ATUAL:**\n`;
   contextualPrompt += `- Dados coletados: ${JSON.stringify(currentAnalysis, null, 2)}\n`;
-  contextualPrompt += `- Pode avançar estágio: ${canAdvanceSpinStage(currentAnalysis)}\n`;
   
   // Add final instructions for batched response
   contextualPrompt += `\n**INSTRUÇÕES PARA RESPOSTA:**\n`;

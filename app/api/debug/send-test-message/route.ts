@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
-const INSTANCE_NAME = "qify-5561999449983";
+const INSTANCE_NAME = "roigem";
 
 export async function POST(request: Request) {
   try {

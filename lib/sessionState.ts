@@ -103,6 +103,15 @@ export class SessionStateManager {
 
   async getFacts(): Promise<SessionFacts> {
     const facts = await redis.hgetall(`sess:${this.sessionId}:facts`)
+    // Handle case where Redis returns null or empty object
+    if (!facts) {
+      return {
+        name: undefined,
+        personType: undefined,
+        business: undefined,
+        contact: undefined
+      }
+    }
     return {
       name: facts.name || undefined,
       personType: (facts.personType as 'PF' | 'PJ') || undefined,
