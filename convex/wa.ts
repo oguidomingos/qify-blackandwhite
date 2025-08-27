@@ -2,7 +2,117 @@ import { v } from "convex/values";
 import { action, internalAction, internalQuery, mutation, internalMutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 
-// Helper function to get working instances from Evolution API
+// Enhanced Evolution API validation and health check functions
+export const validateEvolutionEndpoints = action({
+  args: {
+    baseUrl: v.optional(v.string()),
+    apiKey: v.optional(v.string())
+  },
+  handler: async (ctx, { baseUrl, apiKey }) => {
+    const EVOLUTION_BASE_URL = baseUrl || process.env.EVOLUTION_BASE_URL;
+    const EVOLUTION_API_KEY = apiKey || process.env.EVOLUTION_API_KEY;
+    
+    if (!EVOLUTION_BASE_URL || !EVOLUTION_API_KEY) {
+      return {
+        success: false,
+        error: "Evolution API credentials not configured",
+        endpoints: {}
+      };
+    }
+
+    const results = {
+      success: true,
+      baseUrl: EVOLUTION_BASE_URL,
+      endpoints: {} as any,
+      summary: {
+        total: 0,
+        working: 0,
+        failed: 0
+      }
+    };
+
+    // List of critical Evolution API endpoints to validate
+    const endpointsToTest = [
+      { name: 'health', path: '/health', method: 'GET' },
+      { name: 'fetchInstances', path: '/instance/fetchInstances', method: 'GET' },
+      { name: 'webhook', path: '/webhook', method: 'GET' },
+      { name: 'manager', path: '/manager', method: 'GET' }
+    ];
+
+    for (const endpoint of endpointsToTest) {
+      results.summary.total++;
+      
+      try {
+        console.log(`🔍 Testing Evolution API endpoint: ${endpoint.name}`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(`${EVOLUTION_BASE_URL}${endpoint.path}`, {
+          method: endpoint.method,
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_API_KEY
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        const responseTime = Date.now();
+        const status = response.status;
+        const isOk = response.ok;
+        
+        let responseData = null;
+        try {
+          responseData = await response.json();
+        } catch {
+          responseData = await response.text();
+        }
+        
+        results.endpoints[endpoint.name] = {
+          success: isOk,
+          status,
+          responseTime,
+          path: endpoint.path,
+          method: endpoint.method,
+          data: isOk ? responseData : null,
+          error: !isOk ? responseData : null
+        };
+        
+        if (isOk) {
+          results.summary.working++;
+          console.log(`✅ ${endpoint.name}: OK (${status})`);
+        } else {
+          results.summary.failed++;
+          console.log(`❌ ${endpoint.name}: FAILED (${status})`);
+        }
+        
+      } catch (error) {
+        results.summary.failed++;
+        results.endpoints[endpoint.name] = {
+          success: false,
+          status: 0,
+          responseTime: 0,
+          path: endpoint.path,
+          method: endpoint.method,
+          data: null,
+          error: error.message
+        };
+        console.log(`🚨 ${endpoint.name}: ERROR - ${error.message}`);
+      }
+    }
+
+    // Determine overall success
+    results.success = results.summary.working > 0 && results.summary.failed < results.summary.total;
+    
+    console.log(`🏁 Evolution API validation complete: ${results.summary.working}/${results.summary.total} endpoints working`);
+    
+    return results;
+  }
+});
+
+// Helper function to get working instances from Evolution API with enhanced error handling
 async function getWorkingInstances(): Promise<string[]> {
   try {
     const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL;
@@ -13,38 +123,118 @@ async function getWorkingInstances(): Promise<string[]> {
       return [];
     }
 
+    console.log(`🔍 Fetching instances from: ${EVOLUTION_BASE_URL}/instance/fetchInstances`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // Extended timeout
+
     const response = await fetch(`${EVOLUTION_BASE_URL}/instance/fetchInstances`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         'apikey': EVOLUTION_API_KEY
       },
-      timeout: 10000
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     if (response.ok) {
       const instances = await response.json();
       console.log(`📋 Found ${instances.length} total instances in Evolution API`);
       
-      // Filter for open/connected instances that start with 'qify-'
+      // Enhanced instance validation
       const workingInstances = instances
-        .filter((instance: any) => 
-          instance.connectionStatus?.state === 'open' && 
-          (instance.instanceName || instance.name || '').startsWith('qify-')
-        )
+        .filter((instance: any) => {
+          const name = instance.instanceName || instance.name || '';
+          const state = instance.connectionStatus?.state || instance.state;
+          const isQify = name.startsWith('qify-');
+          const isConnected = state === 'open' || state === 'connected';
+          
+          console.log(`Instance ${name}: state=${state}, isQify=${isQify}, isConnected=${isConnected}`);
+          
+          return isQify && isConnected;
+        })
         .map((instance: any) => instance.instanceName || instance.name);
 
       console.log(`✅ Working Qify instances: ${workingInstances.join(', ')}`);
       return workingInstances;
+    } else {
+      const errorText = await response.text();
+      console.log(`❌ Failed to fetch instances: ${response.status} - ${errorText}`);
+      return [];
     }
     
-    console.log("Failed to fetch instances from Evolution API");
-    return [];
   } catch (error) {
     console.error('🚨 Error getting working instances:', error);
     return [];
   }
 }
+
+// New function to test instance health
+export const testInstanceHealth = action({
+  args: {
+    instanceName: v.string(),
+    baseUrl: v.optional(v.string()),
+    apiKey: v.optional(v.string())
+  },
+  handler: async (ctx, { instanceName, baseUrl, apiKey }) => {
+    const EVOLUTION_BASE_URL = baseUrl || process.env.EVOLUTION_BASE_URL;
+    const EVOLUTION_API_KEY = apiKey || process.env.EVOLUTION_API_KEY;
+    
+    if (!EVOLUTION_BASE_URL || !EVOLUTION_API_KEY) {
+      return { success: false, error: "Evolution API credentials not configured" };
+    }
+
+    try {
+      console.log(`🩺 Testing health of instance: ${instanceName}`);
+      
+      // Test instance connection status
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(`${EVOLUTION_BASE_URL}/instance/connectionState/${instanceName}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': EVOLUTION_API_KEY
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ Instance ${instanceName} health check passed:`, data);
+        
+        return {
+          success: true,
+          instanceName,
+          connectionState: data,
+          status: data.instance?.state || data.state || 'unknown'
+        };
+      } else {
+        const errorText = await response.text();
+        console.log(`❌ Instance ${instanceName} health check failed: ${response.status} - ${errorText}`);
+        
+        return {
+          success: false,
+          instanceName,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+      
+    } catch (error) {
+      console.error(`🚨 Error testing instance ${instanceName} health:`, error);
+      return {
+        success: false,
+        instanceName,
+        error: error.message
+      };
+    }
+  }
+});
 
 export const sendMessage = internalAction({
   args: {

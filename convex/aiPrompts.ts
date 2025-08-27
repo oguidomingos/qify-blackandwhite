@@ -109,10 +109,10 @@ Você é um assistente virtual e SDR especializado em qualificação de prospect
 📋 **Coleta de Dados Obrigatória (SEMPRE coletar)**
 
 **1️⃣ Informações Básicas do Prospect:**
-* **Nome completo**
-* **Telefone/WhatsApp** (preferencial)
-* **Tipo de pessoa:** Física ou Jurídica
-* **Se Jurídica:** Nome da empresa e cargo/função
+* **Nome completo** {{#if facts.name}}✅ Coletado: {{facts.name}}{{else}}❌ Pendente{{/if}}
+* **Tipo de pessoa:** Física ou Jurídica {{#if facts.personType}}✅ Coletado: {{facts.personType}}{{else}}❌ Pendente{{/if}}
+* **Se Jurídica:** Nome da empresa {{#if facts.business}}✅ Coletado: {{facts.business}}{{else}}❌ Pendente{{/if}}
+* **Contato/WhatsApp** {{#if facts.contact}}✅ Coletado: {{facts.contact}}{{else}}❌ Pendente{{/if}}
 * **Gênero:** Perceber pela forma de escrever (não perguntar diretamente)
 
 **2️⃣ Contexto do Interesse:**
@@ -120,19 +120,30 @@ Você é um assistente virtual e SDR especializado em qualificação de prospect
 * **Urgência** (quando precisa resolver)
 * **Orçamento/Budget** (se aplicável)
 
+🎯 **Estado Atual da Conversa**
+* **Estágio SPIN:** {{currentStage}} ({{stageLabel}})
+* **Perguntas já feitas:** {{askedQuestions}}
+* **Tópicos já respondidos:** {{answeredTopics}}
+
 🎯 **Processo de Qualificação**
 
-**1️⃣ Primeira Interação:**
+**GATING LOGIC - CRÍTICO:**
+- ❌ NÃO pode avançar para estágio "P" (Problema) até coletar: Nome + Tipo de Pessoa + Empresa (se PJ)
+- ✅ Só avance quando todos os dados obrigatórios estiverem coletados
+- 🚫 NUNCA pule etapas do SPIN sem coletar dados básicos
+
+**1️⃣ Primeira Interação (Estágio S - Situação):**
 - Cumprimento profissional e empático
 - Coleta do nome e tipo de pessoa
+- Se PJ: coletar nome da empresa
 - Entendimento inicial do motivo do contato
 
-**2️⃣ Coleta de Dados:**
-- Nome da empresa (se PJ) 
-- Função/cargo (se PJ)
-- Detalhamento da necessidade
+**2️⃣ Coleta de Dados (Ainda Estágio S):**
+- Completar dados obrigatórios pendentes
+- Confirmar informações coletadas
+- Só então partir para problemas/dores
 
-**3️⃣ Qualificação (aplicar metodologia específica):**
+**3️⃣ Qualificação (Estágios P, I, N):**
 - Usar metodologia definida pelo usuário
 - Focar em qualificar fit e necessidade
 - Manter conversa fluida e natural
@@ -151,13 +162,15 @@ Você é um assistente virtual e SDR especializado em qualificação de prospect
 ✅ **Fluxo:** Uma pergunta por vez, progressão lógica
 
 🚨 **Regras Importantes**
-- NUNCA repetir perguntas já respondidas
+- NUNCA repetir perguntas já respondidas (verificar {{askedQuestions}})
 - SEMPRE manter dados coletados em contexto
 - Perceber gênero pela escrita (não perguntar)
 - Ser empático mas manter foco comercial
 - Conduzir naturalmente para agendamento
+- RESPEITAR O GATING: não avançar estágios sem dados obrigatórios
 
-📅 **Data atual:** {{$now}}`;
+📅 **Data atual:** {{currentDate}}
+🕐 **Última atividade:** {{lastActivity}}`;
 }
 
 function getDefaultSpinPrompt(): string {
@@ -203,4 +216,111 @@ Como SDR especialista, use a metodologia SPIN para qualificar prospects e agenda
 *Need-payoff:* "Se resolvêssemos isso, qual seria o maior benefício?"
 
 **OBJETIVO FINAL:** Descobrir fit e agendar conversa com time comercial.`;
+}
+
+// Template substitution function for dynamic prompt variables
+function substitutePromptTemplate(template: string, variables: any): string {
+  let result = template;
+  
+  // Handle special $now variable first
+  result = result.replace(/\{\{\$now\}\}/g, () => {
+    return new Date().toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit', 
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  });
+  
+  // Simple variable substitution like {{variableName}}
+  result = result.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+    return variables[varName] !== undefined ? String(variables[varName]) : match;
+  });
+  
+  // Conditional substitution like {{#if variable}}content{{else}}alternative{{/if}}
+  result = result.replace(/\{\{#if\s+(\w+(?:\.\w+)*)\}\}(.*?)\{\{else\}\}(.*?)\{\{\/if\}\}/gs, (match, varPath, ifContent, elseContent) => {
+    const value = getNestedProperty(variables, varPath);
+    return value ? ifContent : elseContent;
+  });
+  
+  // Simple conditionals without else
+  result = result.replace(/\{\{#if\s+(\w+(?:\.\w+)*)\}\}(.*?)\{\{\/if\}\}/gs, (match, varPath, content) => {
+    const value = getNestedProperty(variables, varPath);
+    return value ? content : '';
+  });
+  
+  // Nested property access like {{facts.name}}
+  result = result.replace(/\{\{(\w+\.\w+)\}\}/g, (match, varPath) => {
+    const value = getNestedProperty(variables, varPath);
+    return value !== undefined ? String(value) : match;
+  });
+  
+  return result;
+}
+
+// Helper function to get nested properties
+function getNestedProperty(obj: any, path: string): any {
+  return path.split('.').reduce((current, key) => {
+    return current && current[key] !== undefined ? current[key] : undefined;
+  }, obj);
+}
+
+// Enhanced getFullPrompt with template substitution
+export const getFullPromptWithSubstitution = query({
+  args: {
+    orgId: v.id("organizations"),
+    sessionState: v.optional(v.any()),
+    currentStage: v.optional(v.string()),
+    facts: v.optional(v.any()),
+    askedQuestions: v.optional(v.array(v.string())),
+    answeredTopics: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, { orgId, sessionState, currentStage, facts, askedQuestions, answeredTopics }) => {
+    const activePrompt = await ctx.db
+      .query("ai_prompts")
+      .withIndex("by_org_kind_active", (q: any) => 
+        q.eq("orgId", orgId).eq("kind", "spin_sdr").eq("active", true)
+      )
+      .first();
+
+    const userPrompt = activePrompt?.content || getDefaultSpinPrompt();
+    let systemMessage = getSystemMessage();
+    
+    // Prepare template variables
+    const templateVars = {
+      currentDate: new Date().toLocaleDateString('pt-BR'),
+      lastActivity: sessionState?.lastUserTs ? new Date(sessionState.lastUserTs).toLocaleString('pt-BR') : 'Não disponível',
+      currentStage: currentStage || 'S',
+      stageLabel: getStageLabel(currentStage || 'S'),
+      facts: facts || {},
+      askedQuestions: (askedQuestions || []).join(', ') || 'Nenhuma',
+      answeredTopics: (answeredTopics || []).join(', ') || 'Nenhum',
+    };
+    
+    // Apply template substitution to system message
+    systemMessage = substitutePromptTemplate(systemMessage, templateVars);
+    
+    // Apply template substitution to user prompt as well
+    const processedUserPrompt = substitutePromptTemplate(userPrompt, templateVars);
+    
+    return {
+      systemMessage,
+      userPrompt: processedUserPrompt,
+      fullPrompt: `${systemMessage}\n\n---\n\n${processedUserPrompt}`,
+      templateVars
+    };
+  },
+});
+
+function getStageLabel(stage: string): string {
+  const labels = {
+    'S': 'Situação - Coletando dados básicos',
+    'P': 'Problema - Identificando dores',
+    'I': 'Implicação - Explorando consequências',
+    'N': 'Necessidade - Criando urgência'
+  };
+  return labels[stage] || stage;
 }

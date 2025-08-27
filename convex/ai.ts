@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalAction, internalQuery } from "./_generated/server";
+import { action, internalAction, internalQuery, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 export const generateAiReply = action({
@@ -61,6 +61,180 @@ export const generateAiReply = action({
       throw error;
     }
   },
+});
+
+// New scheduler-compatible function for Redis batching integration
+export const scheduleReply = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    orgId: v.id("organizations"), 
+    scheduledFor: v.number(),
+    correlationId: v.string()
+  },
+  handler: async (ctx, { sessionId, orgId, scheduledFor, correlationId }) => {
+    console.log(`[${correlationId}] Scheduling AI reply for session ${sessionId} at ${new Date(scheduledFor).toISOString()}`);
+    
+    // Use Convex scheduler to call our processing function at the specified time
+    await ctx.scheduler.runAt(scheduledFor, internal.ai.processScheduledReplyWithRedis, {
+      sessionId,
+      orgId,
+      scheduledFor,
+      correlationId
+    });
+    
+    return {
+      success: true,
+      scheduledFor,
+      scheduledAt: new Date(scheduledFor).toISOString()
+    };
+  }
+});
+
+// Enhanced scheduled function that works with Redis batching
+export const processScheduledReplyWithRedis = internalAction({
+  args: {
+    sessionId: v.id("sessions"),
+    orgId: v.id("organizations"),
+    scheduledFor: v.number(),
+    correlationId: v.string()
+  },
+  handler: async (ctx, { sessionId, orgId, scheduledFor, correlationId }) => {
+    console.log(`[${correlationId}] Processing scheduled Redis-batched AI reply for session ${sessionId}`);
+    
+    try {
+      // Import Redis helper dynamically to avoid Convex issues
+      const { SessionStateManager } = await import("../lib/sessionState");
+      const sessionManager = new SessionStateManager(sessionId);
+      
+      // Try to acquire processing lock
+      const lockAcquired = await sessionManager.acquireLock(300000); // 5 min lock
+      if (!lockAcquired) {
+        console.log(`[${correlationId}] Could not acquire processing lock for session ${sessionId}`);
+        return { skipped: true, reason: "lock_not_acquired" };
+      }
+      
+      try {
+        // Check if batch window has ended 
+        const batchUntil = await sessionManager.getBatchUntil();
+        if (batchUntil && Date.now() < batchUntil) {
+          console.log(`[${correlationId}] Batch window still active until ${new Date(batchUntil).toISOString()}, skipping`);
+          return { skipped: true, reason: "batch_window_active" };
+        }
+        
+        // Drain all pending messages for this batch
+        const pendingMessages = await sessionManager.drainPendingMessages();
+        console.log(`[${correlationId}] Drained ${pendingMessages.length} pending messages for batch processing`);
+        
+        if (pendingMessages.length === 0) {
+          console.log(`[${correlationId}] No pending messages to process`);
+          return { skipped: true, reason: "no_pending_messages" };
+        }
+        
+        // Clear the batch window
+        await sessionManager.clearBatchUntil();
+        
+        // Get session and validate
+        const session = await ctx.runQuery(internal.sessions.getById, { sessionId });
+        if (!session) {
+          console.log(`[${correlationId}] Session ${sessionId} not found`);
+          return { skipped: true, reason: "session_not_found" };
+        }
+        
+        // Get AI configurations
+        const aiConfig = await ctx.runQuery("aiConfigurations:getByOrg", { orgId });
+        const maxMessages = aiConfig?.maxMessagesContext || 20;
+        
+        // Get all messages for context (not just pending ones)
+        const allMessagesDesc = await ctx.runQuery(internal.messages.listBySession, { 
+          sessionId,
+          limit: maxMessages,
+        });
+        
+        const allMessages = allMessagesDesc.reverse(); // chronological order
+        
+        console.log(`[${correlationId}] Processing ${pendingMessages.length} batched messages with ${allMessages.length} context messages`);
+        
+        // Get full prompt with Redis state integration and template substitution
+        const sessionState = await sessionManager.getState();
+        const promptData = await ctx.runQuery("aiPrompts:getFullPromptWithSubstitution", { 
+          orgId,
+          sessionState,
+          currentStage: sessionState.stage,
+          facts: sessionState.facts,
+          askedQuestions: Array.from(sessionState.asked),
+          answeredTopics: Array.from(sessionState.answered)
+        });
+        
+        // Build enhanced context with Redis state and batch info
+        const conversationContext = buildEnhancedSpinConversationWithRedis(
+          allMessages, 
+          session, 
+          promptData,
+          sessionState,
+          pendingMessages
+        );
+        
+        // Call Gemini API
+        const response = await callGemini(conversationContext);
+        
+        if (!response) {
+          throw new Error("No response from Gemini");
+        }
+        
+        console.log(`[${correlationId}] Generated AI response: "${response.substring(0, 100)}..."`);
+        
+        // Get contact info
+        const contact = await ctx.runQuery(internal.contacts.getById, {
+          contactId: session.contactId,
+        });
+        
+        if (!contact) {
+          throw new Error("Contact not found");
+        }
+        
+        // Insert outbound message
+        const messageId = await ctx.runMutation(internal.messages.insertOutbound, {
+          orgId,
+          sessionId,
+          contactId: session.contactId,
+          text: response,
+        });
+        
+        // Send via WhatsApp
+        await ctx.runAction(internal.wa.sendMessage, {
+          orgId,
+          to: contact.externalId,
+          text: response,
+        });
+        
+        // Process NLP and update Redis state
+        await processNLPAndUpdateRedisState(sessionManager, response, allMessages);
+        
+        // Update session variables in Convex
+        const collectedInfo = analyzeCollectedData(allMessages.filter(m => m.direction === "inbound").map(m => m.text));
+        await saveCollectedDataToSession(ctx, sessionId, collectedInfo);
+        await updateSessionFromResponse(ctx, sessionId, response, session);
+        
+        console.log(`[${correlationId}] Batch processing completed successfully`);
+        
+        return {
+          success: true,
+          response: response.substring(0, 100) + "...",
+          batchedMessages: pendingMessages.length,
+          totalContext: allMessages.length,
+          messageId
+        };
+        
+      } finally {
+        // Always release the Redis lock
+        await sessionManager.releaseLock();
+      }
+      
+    } catch (error) {
+      console.error(`[${correlationId}] Error in Redis batch processing:`, error);
+      throw error;
+    }
+  }
 });
 
 // Scheduled function that executes the actual AI processing after batching delay
@@ -475,7 +649,23 @@ async function callGemini(conversationContext: any): Promise<string> {
     throw new Error("Invalid response from Gemini API");
   }
 
-  return data.candidates[0].content.parts[0].text;
+  // Concatenate all parts from Gemini response
+  const parts = data.candidates[0].content.parts;
+  if (!parts || parts.length === 0) {
+    throw new Error("No content parts in Gemini response");
+  }
+  
+  // Join all text parts together
+  const fullText = parts
+    .filter(part => part.text) // Only include parts with text
+    .map(part => part.text)
+    .join('');
+    
+  if (!fullText.trim()) {
+    throw new Error("Empty response from Gemini API");
+  }
+  
+  return fullText;
 }
 
 async function updateSessionFromResponse(ctx: any, sessionId: string, response: string, session: any) {
@@ -622,4 +812,257 @@ function extractKeyPhrases(responses: string[]): string[] {
     });
   });
   return [...new Set(phrases)]; // Remove duplicates
+}
+
+// Enhanced conversation context builder with Redis state integration
+function buildEnhancedSpinConversationWithRedis(
+  messages: any[], 
+  session: any, 
+  promptData: any,
+  sessionState: any,
+  pendingMessages: any[]
+) {
+  const systemMessage = promptData?.systemMessage || getDefaultSpinPrompt();
+  const userPrompt = promptData?.userPrompt || getDefaultSpinPrompt();
+  
+  // Get user responses for analysis
+  const userResponses = messages
+    .filter(m => m.direction === "inbound")
+    .map(m => m.text);
+  
+  // Analyze collected data including Redis facts
+  const currentAnalysis = analyzeCollectedDataWithRedis(userResponses, sessionState.facts);
+  
+  // Build context with Redis state awareness
+  let contextualPrompt = `${systemMessage}\n\n---\n\n${userPrompt}`;
+  
+  // Add Redis state context
+  if (sessionState.stage && sessionState.stage !== 'S') {
+    contextualPrompt += `\n\n**CONTEXTO REDIS:**\n`;
+    contextualPrompt += `- Estágio SPIN atual: ${getStageLabel(sessionState.stage)}\n`;
+    contextualPrompt += `- Perguntas já feitas: ${Array.from(sessionState.asked).join(', ')}\n`;
+    contextualPrompt += `- Tópicos respondidos: ${Array.from(sessionState.answered).join(', ')}\n`;
+  }
+  
+  // Add facts from Redis
+  if (Object.keys(sessionState.facts).length > 0) {
+    contextualPrompt += `\n**DADOS COLETADOS (Redis):**\n`;
+    if (sessionState.facts.name) contextualPrompt += `- Nome: ${sessionState.facts.name}\n`;
+    if (sessionState.facts.personType) contextualPrompt += `- Tipo: ${sessionState.facts.personType}\n`;
+    if (sessionState.facts.business) contextualPrompt += `- Empresa: ${sessionState.facts.business}\n`;
+    if (sessionState.facts.contact) contextualPrompt += `- Contato: ${sessionState.facts.contact}\n`;
+  }
+  
+  // Add batching context
+  contextualPrompt += `\n**CONTEXTO DO LOTE:**\n`;
+  contextualPrompt += `- Mensagens no lote: ${pendingMessages.length}\n`;
+  contextualPrompt += `- Total de mensagens na conversa: ${messages.length}\n`;
+  contextualPrompt += `- Última atividade do usuário: ${new Date(sessionState.lastUserTs).toLocaleString('pt-BR')}\n`;
+  
+  // Build conversation history
+  contextualPrompt += `\n**HISTÓRICO DA CONVERSA:**\n`;
+  messages.forEach(msg => {
+    const prefix = msg.direction === "inbound" ? "Cliente" : "Você";
+    contextualPrompt += `${prefix}: ${msg.text}\n`;
+  });
+  
+  // Add analysis and guidelines
+  contextualPrompt += `\n**ANÁLISE ATUAL:**\n`;
+  contextualPrompt += `- Dados coletados: ${JSON.stringify(currentAnalysis, null, 2)}\n`;
+  contextualPrompt += `- Pode avançar estágio: ${canAdvanceSpinStage(currentAnalysis)}\n`;
+  
+  // Add final instructions for batched response
+  contextualPrompt += `\n**INSTRUÇÕES PARA RESPOSTA:**\n`;
+  contextualPrompt += `- Responda com BASE em TODAS as mensagens do lote\n`;
+  contextualPrompt += `- Mantenha resposta ÚNICA e consolidada\n`;
+  contextualPrompt += `- Progrida naturalmente na metodologia SPIN\n`;
+  contextualPrompt += `- Evite repetir perguntas já feitas (verificar Redis)\n`;
+  contextualPrompt += `- Mantenha tom conversacional e profissional\n`;
+  
+  return contextualPrompt;
+}
+
+// Enhanced data analysis with Redis facts integration
+function analyzeCollectedDataWithRedis(userResponses: string[], redisFacts: any) {
+  // Start with Redis facts as base
+  const analysis = {
+    name: redisFacts.name ? [redisFacts.name] : [],
+    personType: redisFacts.personType ? [redisFacts.personType] : [],
+    business: redisFacts.business ? [redisFacts.business] : [], 
+    contact: redisFacts.contact ? [redisFacts.contact] : [],
+    lastUpdated: Date.now()
+  };
+  
+  // Enhance with NLP analysis of recent messages
+  userResponses.forEach(response => {
+    const text = response.toLowerCase();
+    
+    // Name extraction (preserve Redis data but add new findings)
+    const namePatterns = [
+      /meu nome é ([a-záêç\s]+)/i,
+      /me chamo ([a-záêç\s]+)/i,
+      /sou ([a-záêç\s]+)/i,
+    ];
+    
+    namePatterns.forEach(pattern => {
+      const match = response.match(pattern);
+      if (match && match[1]) {
+        const name = match[1].trim();
+        if (name.length > 2 && !analysis.name.includes(name)) {
+          analysis.name.push(name);
+        }
+      }
+    });
+    
+    // Person type detection
+    if (/\b(cnpj|empresa|companhia|ltda|mei|pj)\b/i.test(text)) {
+      if (!analysis.personType.includes('PJ')) {
+        analysis.personType.push('PJ');
+      }
+    } else if (/\b(cpf|pessoa física|individual|pf)\b/i.test(text)) {
+      if (!analysis.personType.includes('PF')) {
+        analysis.personType.push('PF');
+      }
+    }
+    
+    // Business/company extraction
+    const businessPatterns = [
+      /trabalho na ([^.!?]+)/i,
+      /empresa (.+?)(?:\.|$)/i,
+      /da ([a-zA-Z\s]{3,20})(?:\s|$)/i,
+    ];
+    
+    businessPatterns.forEach(pattern => {
+      const match = response.match(pattern);
+      if (match && match[1]) {
+        const business = match[1].trim();
+        if (business.length > 2 && !analysis.business.includes(business)) {
+          analysis.business.push(business);
+        }
+      }
+    });
+    
+    // Contact extraction
+    const phonePattern = /\b\d{2}\s?\d{4,5}-?\d{4}\b/;
+    const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/;
+    
+    if (phonePattern.test(text)) {
+      const phone = text.match(phonePattern)?.[0];
+      if (phone && !analysis.contact.includes(phone)) {
+        analysis.contact.push(phone);
+      }
+    }
+    
+    if (emailPattern.test(text)) {
+      const email = text.match(emailPattern)?.[0];
+      if (email && !analysis.contact.includes(email)) {
+        analysis.contact.push(email);
+      }
+    }
+  });
+  
+  return analysis;
+}
+
+// NLP processing and Redis state update
+async function processNLPAndUpdateRedisState(sessionManager: any, response: string, messages: any[]) {
+  const userMessages = messages.filter(m => m.direction === "inbound").map(m => m.text);
+  const currentFacts = await sessionManager.getFacts();
+  
+  // Analyze and extract new information
+  const newAnalysis = analyzeCollectedDataWithRedis(userMessages, currentFacts);
+  
+  // Update Redis facts with new findings
+  if (newAnalysis.name.length > 0 && newAnalysis.name[0] !== currentFacts.name) {
+    await sessionManager.setFact('name', newAnalysis.name[0]);
+  }
+  
+  if (newAnalysis.personType.length > 0 && newAnalysis.personType[0] !== currentFacts.personType) {
+    await sessionManager.setFact('personType', newAnalysis.personType[0]);
+  }
+  
+  if (newAnalysis.business.length > 0 && newAnalysis.business[0] !== currentFacts.business) {
+    await sessionManager.setFact('business', newAnalysis.business[0]);
+  }
+  
+  if (newAnalysis.contact.length > 0 && newAnalysis.contact[0] !== currentFacts.contact) {
+    await sessionManager.setFact('contact', newAnalysis.contact[0]);
+  }
+  
+  // Determine what was asked in the response
+  const questionsAsked = extractQuestionsFromResponse(response);
+  for (const question of questionsAsked) {
+    await sessionManager.addAsked(question);
+  }
+  
+  // Determine what was answered by user
+  const topicsAnswered = extractTopicsAnswered(userMessages[userMessages.length - 1] || "");
+  for (const topic of topicsAnswered) {
+    await sessionManager.addAnswered(topic);
+  }
+  
+  // Update SPIN stage based on gating logic
+  const currentStage = await sessionManager.getStage();
+  const newStage = determineNextSpinStage(currentStage, newAnalysis);
+  
+  if (newStage !== currentStage) {
+    await sessionManager.setStage(newStage);
+    console.log(`SPIN stage progressed from ${currentStage} to ${newStage}`);
+  }
+}
+
+function getStageLabel(stage: string): string {
+  const labels = {
+    'S': 'Situação',
+    'P': 'Problema', 
+    'I': 'Implicação',
+    'N': 'Necessidade'
+  };
+  return labels[stage] || stage;
+}
+
+function extractQuestionsFromResponse(response: string): string[] {
+  const sentences = response.split(/[.!?]/);
+  return sentences
+    .filter(s => s.includes('?') || /\b(que|qual|quando|onde|como|poderia)\b/i.test(s))
+    .map(s => s.replace(/[^\w\s]/g, '').trim().toLowerCase())
+    .filter(s => s.length > 5);
+}
+
+function extractTopicsAnswered(userResponse: string): string[] {
+  const topics = [];
+  const text = userResponse.toLowerCase();
+  
+  // Common topics that indicate answers
+  if (text.includes('trabalho') || text.includes('empresa')) topics.push('trabalho');
+  if (text.includes('problema') || text.includes('dificuldade')) topics.push('problemas');
+  if (text.includes('objetivo') || text.includes('meta')) topics.push('objetivos');
+  if (text.includes('orçamento') || text.includes('investir')) topics.push('orcamento');
+  if (text.includes('prazo') || text.includes('quando')) topics.push('cronograma');
+  
+  return topics;
+}
+
+function determineNextSpinStage(currentStage: string, analysis: any): string {
+  // Gating logic: require name + personType + business before advancing from S
+  if (currentStage === 'S') {
+    const hasName = analysis.name.length > 0;
+    const hasPersonType = analysis.personType.length > 0;
+    const hasBusiness = analysis.business.length > 0;
+    
+    if (hasName && hasPersonType && hasBusiness) {
+      return 'P'; // Can advance to Problem
+    }
+    return 'S'; // Stay in Situation
+  }
+  
+  // Simple progression for other stages
+  const stageOrder = ['S', 'P', 'I', 'N'];
+  const currentIndex = stageOrder.indexOf(currentStage);
+  
+  if (currentIndex < stageOrder.length - 1) {
+    return stageOrder[currentIndex + 1];
+  }
+  
+  return currentStage; // Stay at final stage
 }

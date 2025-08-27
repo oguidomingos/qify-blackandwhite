@@ -35,9 +35,9 @@ export const getByOrg = query({
     // Return default values if no config exists
     if (!config) {
       return {
-        batchingDelayMs: 3000, // 3 seconds
-        cooldownMs: 5000, // 5 seconds
-        processingTimeoutMs: 30000, // 30 seconds
+        batchingDelayMs: 120000, // 120 seconds (2 minutes) as specified
+        cooldownMs: 110000, // 110 seconds (batching - 10s buffer)
+        processingTimeoutMs: 150000, // 150 seconds (batching + 30s buffer)
         maxMessagesContext: 20, // 20 messages
       };
     }
@@ -119,9 +119,9 @@ export const upsert = mutation({
 export const getDefaults = query({
   handler: async () => {
     return {
-      batchingDelayMs: 3000, // 3 seconds
-      cooldownMs: 5000, // 5 seconds
-      processingTimeoutMs: 30000, // 30 seconds
+      batchingDelayMs: 120000, // 120 seconds (2 minutes) as specified
+      cooldownMs: 110000, // 110 seconds (batching - 10s buffer)
+      processingTimeoutMs: 150000, // 150 seconds (batching + 30s buffer)
       maxMessagesContext: 20, // 20 messages
     };
   },

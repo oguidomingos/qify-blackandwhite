@@ -115,6 +115,16 @@ export const listRecent = query({
   },
 });
 
+export const getByProviderId = query({
+  args: { providerMessageId: v.string() },
+  handler: async (ctx, { providerMessageId }) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_provider_id", (q: any) => q.eq("providerMessageId", providerMessageId))
+      .first();
+  },
+});
+
 export const getByInstance = query({
   args: { 
     instanceName: v.string(),
@@ -244,6 +254,12 @@ export const upsertFromEvolution = mutation({
       lastMessageAt: messageData.createdAt
     });
     
-    return newMessageId;
+    return {
+      messageId: newMessageId,
+      sessionId: session._id,
+      contactId: contact._id,
+      isNewSession: !session,
+      isNewContact: !contact
+    };
   },
 });
