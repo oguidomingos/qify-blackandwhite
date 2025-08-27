@@ -80,63 +80,37 @@ export function useEvolutionData(): DashboardData {
     };
   }
   
-  // Get organization from Convex
-  let orgQuery;
-  try {
-    // Try with the known working organization first, then fallback to user's org
-    const clerkId = organization?.id || user?.id || "";
-    const knownWorkingOrgId = "org_2q8YpFZMrO9Cp80q6mGgRk2hHyT"; // roigem org
-    
-    orgQuery = useQuery(
-      api.auth?.getOrganization,
-      { clerkOrgId: clerkId || knownWorkingOrgId }
-    );
-    
-    // If no organization found with user's ID, try the roigem organization
-    if (!orgQuery && clerkId !== knownWorkingOrgId) {
-      orgQuery = useQuery(
-        api.auth?.getOrganization,
-        { clerkOrgId: knownWorkingOrgId }
-      );
-    }
-  } catch (error) {
-    console.error('Error querying organization:', error);
-    orgQuery = null;
-  }
+  // Get organization from Convex - always use roigem as fallback
+  const knownWorkingOrgId = "org_2q8YpFZMrO9Cp80q6mGgRk2hHyT"; // roigem org
+  const clerkId = organization?.id || knownWorkingOrgId;
+  
+  const orgQuery = useQuery(
+    api.auth?.getOrganization,
+    { clerkOrgId: clerkId }
+  );
 
   // Get real data from Convex - only run queries when we have an organization
-  let contactsQuery, messagesQueryResult, sessionsQuery, spinSessionsQuery;
-  let messages = [];
+  const contactsQuery = useQuery(
+    orgQuery?._id ? api.contacts?.listByOrg : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id } : undefined
+  );
   
-  try {
-    contactsQuery = useQuery(
-      orgQuery?._id ? api.contacts?.listByOrg : undefined,
-      orgQuery?._id ? { orgId: orgQuery._id } : undefined
-    );
-    
-    messagesQueryResult = useQuery(
-      orgQuery?._id ? api.messages?.listRecent : undefined,
-      orgQuery?._id ? { orgId: orgQuery._id, limit: 50 } : undefined
-    );
-    
-    messages = messagesQueryResult?.messages || [];
-    
-    sessionsQuery = useQuery(
-      orgQuery?._id ? api.sessions?.listByOrg : undefined,
-      orgQuery?._id ? { orgId: orgQuery._id } : undefined
-    );
-    
-    spinSessionsQuery = useQuery(
-      orgQuery?._id ? api.sessions?.listSpin : undefined,
-      orgQuery?._id ? { orgId: orgQuery._id } : undefined
-    );
-  } catch (error) {
-    console.error('Error with Convex queries:', error);
-    contactsQuery = [];
-    messagesQueryResult = { messages: [] };
-    sessionsQuery = [];
-    spinSessionsQuery = [];
-  }
+  const messagesQueryResult = useQuery(
+    orgQuery?._id ? api.messages?.listRecent : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id, limit: 50 } : undefined
+  );
+  
+  const messages = messagesQueryResult?.messages || [];
+  
+  const sessionsQuery = useQuery(
+    orgQuery?._id ? api.sessions?.listByOrg : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id } : undefined
+  );
+  
+  const spinSessionsQuery = useQuery(
+    orgQuery?._id ? api.sessions?.listSpin : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id } : undefined
+  );
 
   // Calculate derived data
   const contacts = contactsQuery || [];
