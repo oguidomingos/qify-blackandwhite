@@ -58,9 +58,15 @@ export const getById = internalQuery({
 export const getByInstanceName = query({
   args: { instanceName: v.string() },
   handler: async (ctx, { instanceName }) => {
-    // For now, we'll find organization by matching the instance name pattern
-    // instanceName format: qify-{phoneNumber}
-    const phoneNumber = instanceName.replace('qify-', '');
+    // instanceName can be either:
+    // 1. qify-{phoneNumber} format (legacy)
+    // 2. Direct instance name (new approach)
+    let phoneNumber = instanceName;
+    
+    // If it starts with qify-, extract the phone number part
+    if (instanceName.startsWith('qify-')) {
+      phoneNumber = instanceName.replace('qify-', '');
+    }
     
     console.log('Looking for phone number:', phoneNumber);
     
@@ -72,10 +78,11 @@ export const getByInstanceName = query({
     console.log('Found agent configs:', agentConfigs.length);
     
     for (const config of agentConfigs) {
-      const configPhone = config.phoneNumber?.replace(/[^\d]/g, '');
-      console.log(`Comparing ${configPhone} with ${phoneNumber}`);
+      // Compare phoneNumber directly without removing non-digits
+      // This allows matching both numeric phone numbers and instance names like "roigem"
+      console.log(`Comparing ${config.phoneNumber} with ${phoneNumber}`);
       
-      if (configPhone === phoneNumber) {
+      if (config.phoneNumber === phoneNumber) {
         console.log('Found matching config, getting org:', config.orgId);
         const org = await ctx.db.get(config.orgId);
         return org;
@@ -204,6 +211,20 @@ export const createForInstance = mutation({
       baseUrl: "https://evolutionapi.centralsupernova.com.br",
       token: "509dbd54-c20c-4a5b-b889-a0494a861f5a",
       createdAt: Date.now(),
+    });
+    
+    return await ctx.db.get(orgId);
+  },
+});
+
+export const updateClerkAssociation = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    clerkOrgId: v.string()
+  },
+  handler: async (ctx, { orgId, clerkOrgId }) => {
+    await ctx.db.patch(orgId, {
+      clerkOrgId: clerkOrgId
     });
     
     return await ctx.db.get(orgId);
