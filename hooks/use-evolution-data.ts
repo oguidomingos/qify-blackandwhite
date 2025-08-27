@@ -65,8 +65,8 @@ export function useEvolutionData(): DashboardData {
   const { organization } = useOrganization();
   const { user } = useUser();
   
-  // Early return with mock data if no organization/user
-  if (!organization?.id && !user?.id) {
+  // Early return with error if no user is logged in
+  if (!user?.id) {
     return {
       todayMessages: 0,
       activeContacts: 0,
@@ -173,9 +173,7 @@ export function useEvolutionData(): DashboardData {
   }));
 
   // Check loading states
-  const hasUserOrOrg = !!(organization?.id || user?.id);
-  const isLoading = !hasUserOrOrg || 
-                   orgQuery === undefined || 
+  const isLoading = orgQuery === undefined || 
                    (orgQuery && (
                      contactsQuery === undefined || 
                      messagesQueryResult === undefined || 
@@ -183,7 +181,7 @@ export function useEvolutionData(): DashboardData {
                      spinSessionsQuery === undefined
                    ));
 
-  const error = hasUserOrOrg && !isLoading && !orgQuery ? 
+  const error = !isLoading && !orgQuery ? 
     "Organização não encontrada. Faça o onboarding primeiro." : null;
 
   return {
