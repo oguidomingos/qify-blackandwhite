@@ -66,29 +66,33 @@ export function useEvolutionData(): DashboardData {
   const { user } = useUser();
   
   // Get organization from Convex
-  const orgQuery = useQuery(api.organizations.getByClerkId, {
-    clerkId: organization?.id || user?.id || ""
-  });
+  const orgQuery = useQuery(
+    (organization?.id || user?.id) ? api.organizations.getByClerkId : undefined,
+    (organization?.id || user?.id) ? { clerkId: organization?.id || user?.id || "" } : undefined
+  );
 
-  // Get real data from Convex
-  const contactsQuery = useQuery(orgQuery ? api.contacts.listByOrg : "skip", {
-    orgId: orgQuery?._id
-  });
+  // Get real data from Convex - only run queries when we have an organization
+  const contactsQuery = useQuery(
+    orgQuery?._id ? api.contacts.listByOrg : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id } : undefined
+  );
   
-  const messagesQueryResult = useQuery(orgQuery ? api.messages.listRecent : "skip", {
-    orgId: orgQuery?._id,
-    limit: 50
-  });
+  const messagesQueryResult = useQuery(
+    orgQuery?._id ? api.messages.listRecent : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id, limit: 50 } : undefined
+  );
   
   const messages = messagesQueryResult?.messages || [];
   
-  const sessionsQuery = useQuery(orgQuery ? api.sessions.listByOrg : "skip", {
-    orgId: orgQuery?._id
-  });
+  const sessionsQuery = useQuery(
+    orgQuery?._id ? api.sessions.listByOrg : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id } : undefined
+  );
   
-  const spinSessionsQuery = useQuery(orgQuery ? api.sessions.listSpin : "skip", {
-    orgId: orgQuery?._id
-  });
+  const spinSessionsQuery = useQuery(
+    orgQuery?._id ? api.sessions.listSpin : undefined,
+    orgQuery?._id ? { orgId: orgQuery._id } : undefined
+  );
 
   // Calculate derived data
   const contacts = contactsQuery || [];
@@ -125,13 +129,17 @@ export function useEvolutionData(): DashboardData {
   }));
 
   // Check loading states
-  const isLoading = orgQuery === undefined || 
-                   contactsQuery === undefined || 
-                   messagesQueryResult === undefined || 
-                   sessionsQuery === undefined ||
-                   spinSessionsQuery === undefined;
+  const hasUserOrOrg = !!(organization?.id || user?.id);
+  const isLoading = !hasUserOrOrg || 
+                   orgQuery === undefined || 
+                   (orgQuery && (
+                     contactsQuery === undefined || 
+                     messagesQueryResult === undefined || 
+                     sessionsQuery === undefined ||
+                     spinSessionsQuery === undefined
+                   ));
 
-  const error = !isLoading && !orgQuery ? 
+  const error = hasUserOrOrg && !isLoading && !orgQuery ? 
     "Organização não encontrada. Faça o onboarding primeiro." : null;
 
   return {
