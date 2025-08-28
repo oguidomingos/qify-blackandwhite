@@ -85,30 +85,30 @@ export function useEvolutionData(): DashboardData {
   const clerkId = organization?.id || knownWorkingOrgId;
   
   const orgQuery = useQuery(
-    api.auth?.getOrganization,
+    api.auth.getOrganization,
     { clerkOrgId: clerkId }
   );
 
   // Get real data from Convex - only run queries when we have an organization
   const contactsQuery = useQuery(
-    orgQuery?._id ? api.contacts?.listByOrg : undefined,
+    orgQuery?._id ? api.contacts.listByOrg : undefined,
     orgQuery?._id ? { orgId: orgQuery._id } : undefined
   );
   
   const messagesQueryResult = useQuery(
-    orgQuery?._id ? api.messages?.listRecent : undefined,
+    orgQuery?._id ? api.messages.listRecent : undefined,
     orgQuery?._id ? { orgId: orgQuery._id, limit: 50 } : undefined
   );
   
   const messages = messagesQueryResult?.messages || [];
   
   const sessionsQuery = useQuery(
-    orgQuery?._id ? api.sessions?.listByOrg : undefined,
+    orgQuery?._id ? api.sessions.listByOrg : undefined,
     orgQuery?._id ? { orgId: orgQuery._id } : undefined
   );
   
   const spinSessionsQuery = useQuery(
-    orgQuery?._id ? api.sessions?.listSpin : undefined,
+    orgQuery?._id ? api.sessions.listSpin : undefined,
     orgQuery?._id ? { orgId: orgQuery._id } : undefined
   );
 
