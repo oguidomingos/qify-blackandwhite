@@ -47,18 +47,31 @@ export default function InboxPage() {
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [dateRange, setDateRange] = useState<string>('24h'); // '24h', '7d', '30d', 'all'
   
   // Use real data from Convex
   const evolutionData = useEvolutionData();
 
+  // Get date range filter in milliseconds
+  const getDateRangeMs = () => {
+    const now = Date.now();
+    switch (dateRange) {
+      case '24h': return now - (24 * 60 * 60 * 1000);
+      case '7d': return now - (7 * 24 * 60 * 60 * 1000);
+      case '30d': return now - (30 * 24 * 60 * 60 * 1000);
+      case 'all': return 0;
+      default: return now - (24 * 60 * 60 * 1000);
+    }
+  };
+
   // Transform real data for display
   const pendingContacts = evolutionData.contacts
     .filter(contact => {
-      // Show contacts with recent messages (last 24h)
-      const yesterday = Date.now() - (24 * 60 * 60 * 1000);
+      // Show contacts based on selected date range
+      const filterDate = getDateRangeMs();
       return evolutionData.recentMessages.some(msg => 
         msg.contactId === contact._id && 
-        msg.createdAt >= yesterday
+        msg.createdAt >= filterDate
       );
     })
     .map(contact => {
@@ -219,6 +232,21 @@ export default function InboxPage() {
             <Badge variant="secondary" className="glass">
               {pendingContacts.length}
             </Badge>
+          </div>
+
+          {/* Date Range Selector */}
+          <div className="flex items-center space-x-2 pb-3 border-b border-border/30">
+            <span className="text-sm text-muted-foreground">Período:</span>
+            <select 
+              value={dateRange} 
+              onChange={(e) => setDateRange(e.target.value)}
+              className="text-sm bg-background border border-border rounded px-2 py-1 text-foreground"
+            >
+              <option value="24h">Últimas 24h</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+              <option value="all">Todas</option>
+            </select>
           </div>
 
           <div className="space-y-3">

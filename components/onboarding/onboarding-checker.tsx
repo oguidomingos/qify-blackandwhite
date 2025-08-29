@@ -15,7 +15,7 @@ export default function OnboardingChecker({ children }: OnboardingCheckerProps) 
   const { user } = useUser();
   const router = useRouter();
   const pathname = usePathname();
-  const [isChecking, setIsChecking] = useState(true);
+  const [isChecking, setIsChecking] = useState(false);
 
   // Routes that don't require onboarding completion
   const allowedRoutes = [
@@ -45,37 +45,10 @@ export default function OnboardingChecker({ children }: OnboardingCheckerProps) 
     orgId ? { clerkOrgId: orgId } : "skip"
   );
 
+  // TEMPORARY: Skip all onboarding checks for demo
   useEffect(() => {
-    // TEMPORARY FIX: Skip onboarding check for demo purposes
-    // Since we have real Evolution API data working, allow dashboard access
-    console.log("OnboardingChecker: Bypassing onboarding - allowing dashboard access");
     setIsChecking(false);
-    return;
-
-    // If current route is allowed, skip onboarding check
-    if (isAllowedRoute) {
-      setIsChecking(false);
-      return;
-    }
-
-    // Wait for queries to complete
-    if (businessProfile === undefined || agentConfig === undefined) {
-      return; // Still loading
-    }
-
-    // Check if onboarding is complete
-    const hasBusinessProfile = businessProfile !== null;
-    const hasAgentConfig = agentConfig !== null && agentConfig.phoneNumber;
-
-    if (hasBusinessProfile && hasAgentConfig) {
-      // Onboarding completed, user can access dashboard
-      setIsChecking(false);
-    } else {
-      // Onboarding not completed, redirect to onboarding
-      router.push("/onboarding");
-      return;
-    }
-  }, [businessProfile, agentConfig, router, isAllowedRoute]);
+  }, []);
 
   // Show loading while checking (except for allowed routes)
   if (isChecking && !isAllowedRoute) {

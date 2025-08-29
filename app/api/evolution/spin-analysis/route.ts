@@ -77,38 +77,106 @@ const SPIN_PATTERNS: SPINPatterns = {
   ]
 };
 
-function analyzeSPINStage(text: string): { stage: keyof SPINPatterns | null; confidence: number; keywords: string[] } {
-  const normalizedText = text.toLowerCase();
-  const results: Array<{ stage: keyof SPINPatterns; matches: number; keywords: string[] }> = [];
+// Enhanced SPIN analysis using Gemini AI
+async function analyzeSPINStageWithAI(text: string, context: string[] = []): Promise<{ stage: keyof SPINPatterns | null; confidence: number; keywords: string[]; reasoning: string }> {
+  try {
+    const contextStr = context.length > 0 ? `\nContexto da conversa anterior: ${context.slice(-3).join(' → ')}` : '';
+    
+    const prompt = `Analise esta mensagem de vendas e determine o estágio SPIN (Sales methodology).
 
-  Object.entries(SPIN_PATTERNS).forEach(([stage, patterns]) => {
-    const keywords = patterns.filter(pattern => normalizedText.includes(pattern));
-    if (keywords.length > 0) {
-      results.push({
-        stage: stage as keyof SPINPatterns,
-        matches: keywords.length,
-        keywords
-      });
+ESTÁGIOS SPIN:
+- S (Situação): Cliente explica contexto atual, empresa, cargo, situação presente
+- P (Problema): Cliente menciona dores, problemas, insatisfações, dificuldades  
+- I (Implicação): Cliente fala sobre impactos, consequências, custos dos problemas
+- N (Necessidade): Cliente demonstra interesse em soluções, pergunta preços, prazos
+
+MENSAGEM: "${text}"${contextStr}
+
+Responda EXATAMENTE neste formato JSON:
+{
+  "stage": "S|P|I|N|null",
+  "confidence": 0-100,
+  "keywords": ["palavra1", "palavra2"],
+  "reasoning": "Breve explicação do motivo"
+}`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 200,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini API error: ${response.statusText}`);
     }
-  });
 
-  if (results.length === 0) {
-    return { stage: null, confidence: 0, keywords: [] };
+    const data = await response.json();
+    const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!aiResponse) {
+      throw new Error('No response from Gemini AI');
+    }
+
+    // Parse JSON response
+    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('Invalid JSON response from AI');
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    
+    return {
+      stage: parsed.stage === 'null' ? null : parsed.stage,
+      confidence: Math.max(0, Math.min(100, parsed.confidence || 0)),
+      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+      reasoning: parsed.reasoning || ''
+    };
+
+  } catch (error) {
+    console.error('AI SPIN analysis failed, falling back to keyword matching:', error);
+    
+    // Fallback to original keyword-based analysis
+    const normalizedText = text.toLowerCase();
+    const results: Array<{ stage: keyof SPINPatterns; matches: number; keywords: string[] }> = [];
+
+    Object.entries(SPIN_PATTERNS).forEach(([stage, patterns]) => {
+      const keywords = patterns.filter(pattern => normalizedText.includes(pattern));
+      if (keywords.length > 0) {
+        results.push({
+          stage: stage as keyof SPINPatterns,
+          matches: keywords.length,
+          keywords
+        });
+      }
+    });
+
+    if (results.length === 0) {
+      return { stage: null, confidence: 0, keywords: [], reasoning: 'No SPIN indicators found' };
+    }
+
+    results.sort((a, b) => b.matches - a.matches);
+    const bestMatch = results[0];
+    
+    const stagePatterns = SPIN_PATTERNS[bestMatch.stage];
+    const confidence = Math.min(100, (bestMatch.matches / stagePatterns.length) * 100 + (bestMatch.keywords.length * 10));
+    
+    return {
+      stage: bestMatch.stage,
+      confidence: Math.round(confidence),
+      keywords: bestMatch.keywords,
+      reasoning: `Keyword-based analysis: ${bestMatch.keywords.join(', ')}`
+    };
   }
-
-  // Sort by number of matches, get the highest
-  results.sort((a, b) => b.matches - a.matches);
-  const bestMatch = results[0];
-  
-  // Calculate confidence based on matches and text length
-  const stagePatterns = SPIN_PATTERNS[bestMatch.stage];
-  const confidence = Math.min(100, (bestMatch.matches / stagePatterns.length) * 100 + (bestMatch.keywords.length * 10));
-  
-  return {
-    stage: bestMatch.stage,
-    confidence: Math.round(confidence),
-    keywords: bestMatch.keywords
-  };
 }
 
 function calculateSPINScore(stageProgression: SPINSession['stageProgression'], totalMessages: number): number {
@@ -150,26 +218,82 @@ export async function GET(request: NextRequest) {
 
     console.log('🎯 SPIN Analysis - Starting with Convex data...', { contactId, period });
 
-    // Get authentication
+    // Get authenticated user and organization
     const { userId, orgId } = await auth();
     
+    console.log('🔐 Authentication result:', { userId: userId ? 'Present' : 'Missing', orgId: orgId ? 'Present' : 'Missing' });
+    
     if (!userId) {
-      return NextResponse.json({ 
-        success: false, 
-        message: "Usuário não autenticado" 
-      }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get organization from Convex
-    const organization = await convex.query(api.organizations.getByClerkId, {
-      clerkId: orgId || userId
-    });
+    // Get organization from Convex based on authenticated user's org
+    let organization = null;
+    
+    try {
+      if (orgId) {
+        // Try to get organization by Clerk orgId first
+        organization = await convex.query(api.auth.getOrganization, {
+          clerkOrgId: orgId
+        });
+      }
+      
+      if (!organization) {
+        // If no orgId or org not found, this might be a personal account
+        // For now, return error - user needs to be part of an organization
+        console.log('❌ No organization found for user');
+        return NextResponse.json({ 
+          error: "Organization not found. Please join or create an organization first.",
+          requiresOnboarding: true
+        }, { status: 403 });
+      }
+      
+      console.log('✅ Found user organization:', organization.name, organization._id);
+    } catch (error) {
+      console.log('❌ Failed to fetch user organization:', error);
+      return NextResponse.json({ error: "Failed to authenticate organization" }, { status: 500 });
+    }
+    
+    console.log('🏢 Organization authenticated:', organization.name, organization._id);
 
-    if (!organization) {
-      return NextResponse.json({
-        success: false,
-        message: "Organização não encontrada. Complete o onboarding primeiro."
-      }, { status: 404 });
+    // Get real SPIN sessions from Convex for the authenticated organization
+    try {
+      // First, check if we have existing SPIN sessions
+      const spinSessions = await convex.query(api.sessions.listSpin, {
+        orgId: organization._id
+      });
+
+      console.log('📊 Found SPIN sessions:', spinSessions?.length || 0);
+
+      // If we have real SPIN data, return it
+      if (spinSessions && spinSessions.length > 0) {
+        const analytics = {
+          totalSessions: spinSessions.length,
+          qualified: spinSessions.filter((s: any) => s.qualified || s.score > 70).length,
+          stageDistribution: {
+            S: spinSessions.filter((s: any) => s.currentStage === 'S').length,
+            P: spinSessions.filter((s: any) => s.currentStage === 'P').length,
+            I: spinSessions.filter((s: any) => s.currentStage === 'I').length,
+            N: spinSessions.filter((s: any) => s.currentStage === 'N').length
+          },
+          averageScore: spinSessions.length > 0 ? 
+            Math.round(spinSessions.reduce((sum: number, s: any) => sum + (s.score || 0), 0) / spinSessions.length) : 0
+        };
+
+        return NextResponse.json({
+          success: true,
+          sessions: spinSessions,
+          statistics: analytics,
+          period,
+          fallback: false,
+          message: `Análise SPIN de ${spinSessions.length} sessões reais`
+        });
+      }
+
+      // No existing SPIN sessions, analyze messages to create them
+      console.log('📊 No SPIN sessions found, analyzing messages to create them...');
+    } catch (error) {
+      console.error('❌ Error checking SPIN sessions:', error);
     }
 
     // Get messages from Convex
@@ -185,15 +309,23 @@ export async function GET(request: NextRequest) {
       orgId: organization._id
     });
 
-    // Group messages by contact
+    // Group messages by contact and analyze with AI
     const contactMessages: { [key: string]: AnalyzedMessage[] } = {};
     
-    messages.forEach((msg: any) => {
+    // Process messages sequentially to build conversation context
+    for (const msg of messages) {
       if (!contactMessages[msg.contactId]) {
         contactMessages[msg.contactId] = [];
       }
 
-      const analysis = analyzeSPINStage(msg.text);
+      // Get previous messages for context
+      const previousMessages = contactMessages[msg.contactId]
+        .filter(m => m.direction === 'inbound') // Only inbound messages for context
+        .map(m => m.text);
+
+      // Analyze message with AI including context
+      const analysis = await analyzeSPINStageWithAI(msg.text, previousMessages);
+      
       contactMessages[msg.contactId].push({
         text: msg.text,
         direction: msg.direction,
@@ -202,7 +334,7 @@ export async function GET(request: NextRequest) {
         confidence: analysis.confidence,
         keywords: analysis.keywords
       });
-    });
+    }
 
     // Analyze each contact's SPIN progression
     const spinSessions: SPINSession[] = [];

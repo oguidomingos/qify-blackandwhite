@@ -27,53 +27,28 @@ export async function GET(request: Request) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       
-      // Try multiple Evolution API endpoint formats (v2.3.1 compatibility)
-      const endpoints = [
-        `/chat/findContacts/${INSTANCE_NAME}`,
-        `/contact/findAll/${INSTANCE_NAME}`,
-        `/chat/find-contacts/${INSTANCE_NAME}`,
-        `/instance/fetchContacts/${INSTANCE_NAME}`
-      ];
+      // Use documented Evolution API endpoint (v2.3.1) 
+      const endpoint = `/chat/findContacts/${INSTANCE_NAME}`;
+      console.log(`🔍 Using official contacts endpoint: ${endpoint}`);
       
-      let contactsResponse: Response | null = null;
-      let lastError: Error | null = null;
+      const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': EVOLUTION_API_KEY!
+        },
+        body: JSON.stringify({}),
+        signal: controller.signal
+      });
       
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`🔍 Trying contacts endpoint: ${endpoint}`);
-          
-          contactsResponse = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': EVOLUTION_API_KEY!
-            },
-            body: JSON.stringify({}),
-            signal: controller.signal
-          });
-          
-          if (contactsResponse.ok) {
-            console.log(`✅ Contacts endpoint working: ${endpoint}`);
-            break;
-          } else {
-            console.log(`❌ Endpoint ${endpoint} returned: ${contactsResponse.status}`);
-            lastError = new Error(`${endpoint}: ${contactsResponse.status}`);
-          }
-        } catch (error) {
-          console.log(`🚨 Error with endpoint ${endpoint}:`, error);
-          lastError = error instanceof Error ? error : new Error(`Failed: ${endpoint}`);
-        }
-      }
-      
-      if (!contactsResponse || !contactsResponse.ok) {
-        throw lastError || new Error('All contact endpoints failed');
-      }
-
       clearTimeout(timeoutId);
 
-      if (contactsResponse.ok) {
-        const realContacts: EvolutionContact[] = await contactsResponse.json();
-        console.log('✅ Real Evolution contacts fetched:', realContacts.length);
+      if (!contactsResponse.ok) {
+        throw new Error(`Evolution API returned ${contactsResponse.status}: ${contactsResponse.statusText}`);
+      }
+
+      const realContacts: EvolutionContact[] = await contactsResponse.json();
+      console.log('✅ Real Evolution contacts fetched:', realContacts.length);
         
         // Transform real Evolution contacts to our format
         const transformedContacts = realContacts
@@ -110,14 +85,62 @@ export async function GET(request: Request) {
           source: 'evolution_api_real',
           message: `Fetched ${realContacts.length} real contacts from Evolution API`
         });
-      }
-      
-      throw new Error(`Evolution API returned ${contactsResponse.status}: ${contactsResponse.statusText}`);
       
     } catch (apiError) {
-      console.log('🚨 Evolution API failed:', apiError);
+      console.log('🚨 Evolution API failed, falling back to Convex data:', apiError);
       
-      // Return clear error instead of empty data
+      // Fallback to Convex data when Evolution API is unavailable
+      try {
+        const { ConvexHttpClient } = require("convex/browser");
+        const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+        
+        // Get roigem organization
+        const orgs = await convex.query("organizations:list");
+        const roigemOrg = orgs.find((org: any) => 
+          org.name?.toLowerCase().includes("roigem") || 
+          org.instanceName === "roigem"
+        );
+        
+        if (roigemOrg) {
+          const convexContacts = await convex.query("contacts:listByOrg", { 
+            orgId: roigemOrg._id 
+          });
+          
+          console.log(`✅ Fallback: Found ${convexContacts?.length || 0} contacts in Convex`);
+          
+          const formattedContacts = (convexContacts || [])
+            .slice(0, limit)
+            .map((contact: any) => ({
+              _id: contact._id,
+              name: contact.name,
+              channel: contact.channel,
+              externalId: contact.externalId,
+              phoneNumber: contact.externalId?.replace('@s.whatsapp.net', '') || '',
+              profilePicUrl: null,
+              lastMessageAt: Date.now(),
+              createdAt: contact.createdAt || Date.now(),
+              isActive: true,
+              metadata: {
+                source: 'convex_fallback',
+                contactId: contact._id
+              }
+            }));
+          
+          return NextResponse.json({
+            success: true,
+            contacts: formattedContacts,
+            total: convexContacts?.length || 0,
+            retrieved: formattedContacts.length,
+            fallback: true,
+            source: 'convex_database',
+            message: `Exibindo ${formattedContacts.length} contatos do banco de dados (Evolution API indisponível)`
+          });
+        }
+      } catch (convexError) {
+        console.error('❌ Convex fallback also failed:', convexError);
+      }
+      
+      // Final fallback - return error
       const errorMessage = apiError instanceof Error ? apiError.message : "Unknown API error";
       
       return NextResponse.json({
@@ -127,7 +150,7 @@ export async function GET(request: Request) {
         retrieved: 0,
         fallback: false,
         error: errorMessage,
-        message: 'Evolution API indisponível - Verifique conexão com o WhatsApp'
+        message: 'Evolution API e Convex indisponíveis - Tente novamente em alguns minutos'
       }, { status: 503 });
     }
 

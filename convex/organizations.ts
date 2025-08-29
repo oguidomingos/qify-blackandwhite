@@ -1,6 +1,13 @@
 import { v } from "convex/values";
 import { query, mutation, internalQuery } from "./_generated/server";
 
+// List all organizations (used by various debug and fallback paths)
+export const list = query({
+  handler: async (ctx) => {
+    return await ctx.db.query("organizations").collect();
+  },
+});
+
 export const getByClerkId = query({
   args: { clerkId: v.string() },
   handler: async (ctx, { clerkId }) => {
@@ -96,10 +103,10 @@ export const getByInstanceName = query({
 export const createDemo = mutation({
   args: {},
   handler: async (ctx) => {
-    // Create demo organization
+    // Create demo organization with the correct clerkOrgId that the app expects
     const orgId = await ctx.db.insert("organizations", {
-      name: "Demo Organization",
-      clerkOrgId: "demo-org-qify-5561999449983",
+      name: "Qify Organization (roigem)",
+      clerkOrgId: "org_2q8YpFZMrO9Cp80q6mGgRk2hHyT",
       billingPlan: "starter",
       onboardingStep: "completed",
       onboardingCompleted: true,

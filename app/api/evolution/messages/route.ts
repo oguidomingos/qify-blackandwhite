@@ -67,46 +67,22 @@ export async function GET(request: Request) {
         { where: { key: { remoteJid: contactId } } } : 
         { where: {} };
       
-      // Try multiple Evolution API endpoint formats (v2.3.1 compatibility)
-      const endpoints = [
-        `/chat/findMessages/${INSTANCE_NAME}`,
-        `/message/findMany/${INSTANCE_NAME}`,
-        `/chat/fetchMessages/${INSTANCE_NAME}`,
-        `/instance/fetchMessages/${INSTANCE_NAME}`
-      ];
+      // Use documented Evolution API endpoint (v2.3.1)
+      const endpoint = `/chat/findMessages/${INSTANCE_NAME}`;
+      console.log(`🔍 Using official messages endpoint: ${endpoint}`);
       
-      let response: Response | null = null;
-      let lastError: Error | null = null;
+      const response = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': EVOLUTION_API_KEY!
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
       
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`🔍 Trying messages endpoint: ${endpoint}`);
-          
-          response = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': EVOLUTION_API_KEY!
-            },
-            body: JSON.stringify(requestBody),
-            signal: controller.signal
-          });
-          
-          if (response.ok) {
-            console.log(`✅ Messages endpoint working: ${endpoint}`);
-            break;
-          } else {
-            console.log(`❌ Endpoint ${endpoint} returned: ${response.status}`);
-            lastError = new Error(`${endpoint}: ${response.status}`);
-          }
-        } catch (error) {
-          console.log(`🚨 Error with endpoint ${endpoint}:`, error);
-          lastError = error instanceof Error ? error : new Error(`Failed: ${endpoint}`);
-        }
-      }
-      
-      if (!response || !response.ok) {
-        throw lastError || new Error('All message endpoints failed');
+      if (!response.ok) {
+        throw new Error(`Evolution API returned ${response.status}: ${response.statusText}`);
       }
 
       clearTimeout(timeoutId);

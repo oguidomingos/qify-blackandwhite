@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
+import { api } from "@/convex/_generated/api";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
@@ -8,7 +9,7 @@ export async function POST() {
     console.log("Creating demo organization...");
     
     // Create demo organization using the createDemo function
-    const result = await convex.mutation("organizations.createDemo" as any, {});
+    const result = await convex.mutation(api.organizations.createDemo, {});
     
     console.log("Demo organization created:", result);
 

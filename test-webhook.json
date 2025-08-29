@@ -1,15 +1,17 @@
 {
   "event": "messages.upsert",
   "data": {
-    "key": {
-      "id": "TEST123456789",
-      "remoteJid": "5561936180578@s.whatsapp.net",
-      "fromMe": false
-    },
-    "message": {
-      "conversation": "Ola! Sou um lead interessado"
-    },
-    "messageTimestamp": 1724614075,
-    "pushName": "Lead Teste"
+    "messages": [{
+      "key": {
+        "remoteJid": "5511987654321@s.whatsapp.net",
+        "fromMe": false,
+        "id": "test-spin-final-live"
+      },
+      "message": {
+        "conversation": "Olá! Estou interessado em contratar um SDR para minha empresa de tecnologia. Vocês têm experiência no segmento de SaaS B2B?"
+      },
+      "messageTimestamp": 1756489400,
+      "pushName": "Guilherme Live Test"
+    }]
   }
 }

@@ -148,3 +148,10 @@ export const updateSettings = mutation({
     return await ctx.db.patch(config._id, updates);
   },
 });
+
+// Alias used by debug route expecting `agentConfigurations.list`
+export const list = query({
+  handler: async (ctx: any) => {
+    return await ctx.db.query("agent_configurations").collect();
+  },
+});

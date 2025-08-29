@@ -100,3 +100,10 @@ export const listAll = query({
     return await ctx.db.query("business_profiles").collect();
   },
 });
+
+// Alias used by debug route expecting `businessProfiles.list`
+export const list = query({
+  handler: async (ctx: any) => {
+    return await ctx.db.query("business_profiles").collect();
+  },
+});

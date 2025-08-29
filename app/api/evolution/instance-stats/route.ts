@@ -12,14 +12,17 @@ export async function GET() {
     
     // Fetch all instances to find our specific instance with timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
     
     const instancesResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/fetchInstances`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': EVOLUTION_API_KEY!
+        'apikey': EVOLUTION_API_KEY!,
+        'User-Agent': 'Mozilla/5.0 (compatible; Qify/1.0)'
       },
-      signal: controller.signal
+      signal: controller.signal,
+      redirect: 'follow'
     });
 
     clearTimeout(timeoutId);
