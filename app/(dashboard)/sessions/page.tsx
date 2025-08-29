@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Users, MessageSquare, TrendingUp, Calendar, Clock, Target, Loader2 } from "lucide-react";
-import { useOrganization, useUser } from "@clerk/nextjs";
+import { useOrganization, useUser, useAuth } from "@clerk/nextjs";
 
 interface SPINSession {
   contactId: string;
@@ -87,6 +87,7 @@ const getStatusBadge = (qualified: boolean, score: number) => {
 export default function SessionsPage() {
   const { organization } = useOrganization();
   const { user } = useUser();
+  const { getToken } = useAuth();
   
   const [spinData, setSPINData] = useState<SPINData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,9 +99,27 @@ export default function SessionsPage() {
         setIsLoading(true);
         setError(null);
         
-        const response = await fetch('/api/evolution/spin-analysis?period=week');
+        // Get authentication token
+        const token = await getToken();
+        if (!token) {
+          throw new Error('Não foi possível autenticar. Faça login novamente.');
+        }
+        
+        const response = await fetch('/api/evolution/spin-analysis?period=week', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
         if (!response.ok) {
-          throw new Error('Falha ao carregar análise SPIN');
+          if (response.status === 401) {
+            throw new Error('Sessão expirada. Faça login novamente.');
+          } else if (response.status === 403) {
+            throw new Error('Acesso negado. Verifique se você tem permissão.');
+          } else {
+            throw new Error('Falha ao carregar análise SPIN');
+          }
         }
         
         const data = await response.json();
@@ -119,12 +138,17 @@ export default function SessionsPage() {
       }
     };
 
-    fetchSPINData();
-    
-    // Refresh every 2 minutes
-    const interval = setInterval(fetchSPINData, 120000);
-    return () => clearInterval(interval);
-  }, []);
+    // Only fetch if user is authenticated
+    if (user && organization) {
+      fetchSPINData();
+      // Refresh every 2 minutes for authenticated users
+      const interval = setInterval(fetchSPINData, 120000);
+      return () => clearInterval(interval);
+    } else if (!user) {
+      setError('Usuário não autenticado');
+      setIsLoading(false);
+    }
+  }, [user, organization, getToken]);
 
   // Transform sessions data for display
   const sessions = spinData?.sessions?.map(session => {
@@ -272,14 +296,52 @@ export default function SessionsPage() {
           </Card>
         )}
 
-        {!isLoading && sessions.length === 0 && (
+        {/* Empty State */}
+        {!isLoading && sessions.length === 0 && !error && (
           <Card className="glass">
             <CardContent className="p-8 text-center text-muted-foreground">
               <Target className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <h3 className="text-lg font-medium mb-2">Nenhuma sessão ativa</h3>
-              <p className="text-sm">
-                As conversas aparecerão aqui quando analisadas pelo sistema SPIN
+              <h3 className="text-lg font-medium mb-2">Análise SPIN não iniciada</h3>
+              <p className="text-sm mb-4">
+                Para começar a análise SPIN, você precisa ter conversas ativas no WhatsApp.
               </p>
+              <div className="space-y-2 text-xs">
+                <p>• Configure sua instância do WhatsApp</p>
+                <p>• Inicie conversas com leads</p>
+                <p>• O sistema analisará automaticamente usando metodologia SPIN</p>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-4"
+                onClick={() => window.location.reload()}
+              >
+                Atualizar
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Error State */}
+        {!isLoading && error && (
+          <Card className="glass">
+            <CardContent className="p-8 text-center">
+              <div className="text-yellow-500 mb-4">⚠️</div>
+              <h3 className="text-lg font-medium mb-2 text-red-400">Análise SPIN Indisponível</h3>
+              <p className="text-sm text-muted-foreground mb-4">{error}</p>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <p>• Verifique se você está autenticado</p>
+                <p>• Confirme se sua organização está configurada</p>
+                <p>• Verifique se a Evolution API está funcionando</p>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-4"
+                onClick={() => window.location.reload()}
+              >
+                Tentar novamente
+              </Button>
             </CardContent>
           </Card>
         )}

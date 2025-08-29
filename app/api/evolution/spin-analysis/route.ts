@@ -221,10 +221,20 @@ export async function GET(request: NextRequest) {
     // Get authenticated user and organization
     const { userId, orgId } = await auth();
     
-    console.log('🔐 Authentication result:', { userId: userId ? 'Present' : 'Missing', orgId: orgId ? 'Present' : 'Missing' });
+    console.log('🔐 SPIN Analysis - Authentication result:', { 
+      userId: userId ? 'Present' : 'Missing', 
+      orgId: orgId ? 'Present' : 'Missing',
+      timestamp: new Date().toISOString()
+    });
     
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      console.log('❌ SPIN Analysis - No userId provided');
+      return NextResponse.json({ 
+        success: false,
+        error: "Unauthorized",
+        message: "Usuário não autenticado. Faça login novamente.",
+        code: "AUTH_REQUIRED"
+      }, { status: 401 });
     }
 
     // Get organization from Convex based on authenticated user's org
@@ -232,6 +242,7 @@ export async function GET(request: NextRequest) {
     
     try {
       if (orgId) {
+        console.log('🔍 SPIN Analysis - Looking for organization with clerkOrgId:', orgId);
         // Try to get organization by Clerk orgId first
         organization = await convex.query(api.auth.getOrganization, {
           clerkOrgId: orgId
@@ -239,19 +250,41 @@ export async function GET(request: NextRequest) {
       }
       
       if (!organization) {
-        // If no orgId or org not found, this might be a personal account
-        // For now, return error - user needs to be part of an organization
-        console.log('❌ No organization found for user');
+        console.log('❌ SPIN Analysis - Organization not found for user', { userId, orgId });
+        
+        // Try to list available organizations for debugging
+        try {
+          const allOrgs = await convex.query(api.organizations.list);
+          console.log('📋 SPIN Analysis - Available organizations:', allOrgs.length);
+          allOrgs.slice(0, 3).forEach(org => {
+            console.log(`  - ${org.name} (${org.clerkOrgId})`);
+          });
+        } catch (listError) {
+          console.log('❌ Failed to list organizations for debug:', listError);
+        }
+        
         return NextResponse.json({ 
-          error: "Organization not found. Please join or create an organization first.",
+          success: false,
+          error: "Organization not found",
+          message: "Organização não encontrada. Complete o onboarding primeiro.",
+          code: "ORG_NOT_FOUND",
           requiresOnboarding: true
         }, { status: 403 });
       }
       
-      console.log('✅ Found user organization:', organization.name, organization._id);
+      console.log('✅ SPIN Analysis - Found user organization:', {
+        name: organization.name,
+        id: organization._id,
+        clerkOrgId: organization.clerkOrgId
+      });
     } catch (error) {
-      console.log('❌ Failed to fetch user organization:', error);
-      return NextResponse.json({ error: "Failed to authenticate organization" }, { status: 500 });
+      console.error('❌ SPIN Analysis - Failed to fetch user organization:', error);
+      return NextResponse.json({ 
+        success: false,
+        error: "Authentication failed",
+        message: "Falha na autenticação da organização. Tente novamente.",
+        code: "AUTH_ERROR"
+      }, { status: 500 });
     }
     
     console.log('🏢 Organization authenticated:', organization.name, organization._id);
@@ -424,6 +457,24 @@ export async function GET(request: NextRequest) {
         Math.round(spinSessions.reduce((sum, s) => sum + s.score, 0) / spinSessions.length) : 0
     };
 
+    // Handle empty results properly
+    if (spinSessions.length === 0) {
+      console.log('📊 SPIN Analysis - No sessions created from messages');
+      return NextResponse.json({
+        success: true,
+        sessions: [],
+        statistics: {
+          totalSessions: 0,
+          qualified: 0,
+          stageDistribution: { S: 0, P: 0, I: 0, N: 0 },
+          averageScore: 0
+        },
+        period,
+        fallback: false,
+        message: "Nenhuma sessão SPIN criada. Inicie conversas para começar a análise automática."
+      });
+    }
+
     console.log('✅ SPIN analysis completed with Convex data:', spinSessions.length, 'sessions');
     
     return NextResponse.json({
@@ -435,7 +486,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error("🚨 SPIN analysis error:", error);
+    console.error("🚨 SPIN Analysis - Unexpected error:", error);
     
     return NextResponse.json({
       success: false,
@@ -446,8 +497,10 @@ export async function GET(request: NextRequest) {
         stageDistribution: { S: 0, P: 0, I: 0, N: 0 },
         averageScore: 0
       },
-      error: error instanceof Error ? error.message : "Sistema indisponível",
-      message: "Erro na análise SPIN - Verifique se há dados suficientes"
+      error: "Internal server error",
+      message: "Erro interno na análise SPIN. Tente novamente em alguns momentos.",
+      code: "INTERNAL_ERROR",
+      details: error instanceof Error ? error.message : "Unknown error"
     }, { status: 500 });
   }
 }
