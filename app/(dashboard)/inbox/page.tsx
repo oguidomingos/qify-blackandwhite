@@ -30,6 +30,34 @@ interface Chat {
   lastActivityAt: number;
 }
 
+interface Message {
+  _id: string;
+  contactId: string;
+  direction: "inbound" | "outbound";
+  text: string;
+  messageType: string;
+  timestamp: number;
+  senderName: string;
+  fromMe: boolean;
+}
+
+interface Conversation {
+  contactId: string;
+  contactName: string;
+  phoneNumber: string;
+  totalMessages: number;
+  messages: Message[];
+  recentMessages: Message[];
+  statistics: {
+    total: number;
+    inbound: number;
+    outbound: number;
+    lastMessageAt: number;
+    lastMessageDirection: "inbound" | "outbound";
+  };
+  lastMessage: Message | null;
+}
+
 interface InboxData {
   chats: Chat[];
   statistics: {
@@ -44,11 +72,14 @@ export default function InboxPage() {
   const { organization } = useOrganization();
   const { user } = useUser();
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [inboxData, setInboxData] = useState<InboxData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [loadingConversation, setLoadingConversation] = useState(false);
 
   useEffect(() => {
     const fetchInboxData = async () => {
@@ -114,10 +145,28 @@ export default function InboxPage() {
     return `${days}d`;
   }
 
-  const handleContactClick = (contactId: string, contactName: string) => {
+  const handleContactClick = async (contactId: string, contactName: string, remoteJid: string) => {
     setSelectedContact(contactName);
+    setSelectedContactId(remoteJid);
     setIsSpeaking(true);
-    
+    setLoadingConversation(true);
+
+    try {
+      // Fetch conversation messages from Evolution API
+      const response = await fetch(`/api/evolution/conversation?contactId=${encodeURIComponent(remoteJid)}&limit=100`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setConversation(data.conversation);
+          console.log('✅ Conversation loaded:', data.conversation.totalMessages, 'messages');
+        }
+      }
+    } catch (err) {
+      console.error('Error loading conversation:', err);
+    } finally {
+      setLoadingConversation(false);
+    }
+
     // Simulate AI speaking
     setTimeout(() => {
       setIsSpeaking(false);
@@ -265,7 +314,7 @@ export default function InboxPage() {
               <div
                 key={contact.id}
                 className="glass glass-hover p-4 cursor-pointer transition-all duration-200"
-                onClick={() => handleContactClick(contact.id, contact.name)}
+                onClick={() => handleContactClick(contact.id, contact.name, contact.contact.contactId)}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
@@ -309,55 +358,133 @@ export default function InboxPage() {
         </div>
       </div>
 
-      {/* Contextual Info Panel */}
-      <div className="w-80 border-l border-border/30 p-6 overflow-y-auto">
+      {/* Contextual Info Panel - Messages View */}
+      <div className="w-96 border-l border-border/30 p-6 overflow-y-auto">
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Informações Contextuais</h2>
+            <h2 className="text-lg font-semibold text-foreground">
+              {selectedContact ? "Histórico da Conversa" : "Informações Contextuais"}
+            </h2>
           </div>
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">Contato Atual</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-sm">
-                {selectedContact || "Nenhum contato selecionado"}
-              </p>
-            </CardContent>
-          </Card>
+          {selectedContact ? (
+            <>
+              {/* Contact Info Card */}
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">Contato</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="font-semibold text-foreground">{selectedContact}</p>
+                  {conversation && (
+                    <p className="text-xs text-muted-foreground">{conversation.phoneNumber}</p>
+                  )}
+                </CardContent>
+              </Card>
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">Personalidade do Agente</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <p className="text-muted-foreground text-sm">Profissional e Prestativo</p>
-              <div className="text-xs text-muted-foreground">
-                Responde de forma cordial e eficiente, mantendo tom profissional em todas as interações.
-              </div>
-            </CardContent>
-          </Card>
+              {/* Conversation Statistics */}
+              {conversation && (
+                <Card className="glass">
+                  <CardHeader>
+                    <CardTitle className="text-sm">Estatísticas da Conversa</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Total de mensagens</span>
+                      <span className="text-foreground">{conversation.totalMessages}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Recebidas</span>
+                      <span className="text-foreground">{conversation.statistics.inbound}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Enviadas</span>
+                      <span className="text-foreground">{conversation.statistics.outbound}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">Estatísticas</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Conversas ativas</span>
-                <span className="text-foreground">{inboxData?.statistics.active || 0}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Não lidas</span>
-                <span className="text-foreground">{inboxData?.statistics.totalUnreadMessages || 0}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total chats</span>
-                <span className="text-foreground">{inboxData?.statistics.total || 0}</span>
-              </div>
-            </CardContent>
-          </Card>
+              {/* Messages List */}
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">
+                    Últimas Mensagens {loadingConversation && <Loader2 className="inline h-3 w-3 animate-spin ml-2" />}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {loadingConversation && (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        Carregando mensagens...
+                      </div>
+                    )}
+                    {!loadingConversation && conversation?.recentMessages.map((msg, idx) => (
+                      <div
+                        key={msg._id}
+                        className={`p-2 rounded-lg text-xs ${
+                          msg.fromMe
+                            ? 'bg-primary/10 text-foreground ml-4'
+                            : 'bg-secondary/50 text-foreground mr-4'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-xs">
+                            {msg.fromMe ? 'Você' : msg.senderName}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(msg.timestamp).toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-xs leading-relaxed">{msg.text}</p>
+                      </div>
+                    ))}
+                    {!loadingConversation && (!conversation || conversation.recentMessages.length === 0) && (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        Nenhuma mensagem encontrada
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <>
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">Contato Atual</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground text-sm">
+                    Nenhum contato selecionado
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">Estatísticas</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Conversas ativas</span>
+                    <span className="text-foreground">{inboxData?.statistics.active || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Não lidas</span>
+                    <span className="text-foreground">{inboxData?.statistics.totalUnreadMessages || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Total chats</span>
+                    <span className="text-foreground">{inboxData?.statistics.total || 0}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       </div>
 
