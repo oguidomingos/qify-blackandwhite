@@ -149,8 +149,21 @@ Após o deploy, monitore:
 - ✅ Inbox atualizado para exibir todas as mensagens
 - ✅ Setup automático do usuário admin123
 - ✅ Suporte para análise de IA (últimas 20 mensagens)
+- ✅ **Assistente de Voz com IA** - Análise de contexto e sugestões de resposta
+- ✅ **UI limpa e moderna** - Sem elementos sobrepostos ou problemas de z-index
+- ✅ **Filtros de conversa** - Separação entre individuais e grupos
+- ✅ **Nomes de contato reais** - Pull automático dos nomes públicos do WhatsApp
+
+## 🎤 Como Usar o Assistente de Voz
+
+1. **Selecione uma conversa** no painel do meio
+2. **No painel direito**, você verá o card "Assistente de Voz"
+3. **Clique em "Analisar Conversa"** - A IA falará o contexto da conversa
+4. **Clique no microfone** e fale sua instrução (ex: "Pergunte quando ele quer receber o orçamento")
+5. **A IA gerará 2 sugestões** de resposta baseadas na sua instrução
+6. **Escolha uma sugestão** e a mensagem será enviada automaticamente
 
 ---
 
 **Branch**: `claude/evolution-api-credentials-011CUeRrmSD4z9yb95TTmfHg`
-**Commit**: `4f904a34` - Configure Evolution API integration for oguidomingos instance
+**Último Commit**: `5bb2b345` - Clean up inbox UI and fix voice assistant visibility
