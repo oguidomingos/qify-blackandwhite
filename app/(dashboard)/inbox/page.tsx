@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Mic, Check, Edit, Users, Clock, Loader2 } from "lucide-react";
+import { MessageSquare, Mic, Users, Clock, Loader2 } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
 import { VoiceAssistantPanel } from "@/components/voice-assistant-panel";
 
@@ -76,8 +76,6 @@ export default function InboxPage() {
   const { user } = useUser();
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [inboxData, setInboxData] = useState<InboxData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -178,96 +176,38 @@ export default function InboxPage() {
     }
   };
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording);
-  };
-
   return (
     <div className="flex h-screen">
-      {/* Voice Visualization Center */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1 flex items-center justify-center py-12">
-          <div className="text-center">
-            {/* Voice Circle */}
-            <div className="w-48 h-48 rounded-full mx-auto mb-8 relative glass glass-hover">
-              <div className="absolute inset-4 rounded-full bg-primary/10 flex items-center justify-center">
-                {isSpeaking ? (
-                  <div className="w-24 h-24 rounded-full bg-primary/20 animate-voice-wave"></div>
-                ) : (
-                  <div className="speaking-dots">
-                    <div></div>
-                    <div></div>
-                    <div></div>
-                  </div>
-                )}
-              </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex items-center justify-center p-12">
+        <div className="text-center max-w-2xl">
+          <h1 className="text-4xl font-bold mb-4 text-foreground">Inbox WhatsApp</h1>
+          <p className="text-muted-foreground mb-6">
+            Selecione uma conversa para visualizar o histórico completo e usar o assistente de voz
+          </p>
+
+          {inboxData && (
+            <div className="grid grid-cols-3 gap-4 mt-8">
+              <Card className="glass">
+                <CardContent className="pt-6">
+                  <div className="text-3xl font-bold text-primary">{inboxData.statistics.individuals || 0}</div>
+                  <p className="text-sm text-muted-foreground">Conversas Individuais</p>
+                </CardContent>
+              </Card>
+              <Card className="glass">
+                <CardContent className="pt-6">
+                  <div className="text-3xl font-bold text-primary">{inboxData.statistics.groups || 0}</div>
+                  <p className="text-sm text-muted-foreground">Grupos</p>
+                </CardContent>
+              </Card>
+              <Card className="glass">
+                <CardContent className="pt-6">
+                  <div className="text-3xl font-bold text-primary">{inboxData.statistics.total || 0}</div>
+                  <p className="text-sm text-muted-foreground">Total de Conversas</p>
+                </CardContent>
+              </Card>
             </div>
-            
-            <div className="mt-8 space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">
-                {selectedContact ? `Falando sobre ${selectedContact}` : "Voice Assistant"}
-              </h2>
-              <div className="flex items-center justify-center space-x-2">
-                <div className="flex items-center justify-center space-x-2">
-                  {isSpeaking ? (
-                    <>
-                      <div className="speaking-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                      <span className="text-muted-foreground ml-2">IA está falando...</span>
-                    </>
-                  ) : isRecording ? (
-                    <>
-                      <div className="speaking-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                      <span className="text-muted-foreground ml-2">Fale sua mensagem</span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse"></div>
-                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse" style={{animationDelay: '0.2s'}}></div>
-                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse" style={{animationDelay: '0.4s'}}></div>
-                      <span className="text-muted-foreground ml-2">Ready to assist</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Floating Actions */}
-        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-20">
-          <div className="flex items-center space-x-4">
-            <Button
-              onClick={toggleRecording}
-              size="lg"
-              className={`glass glass-hover p-4 rounded-full transition-all duration-300 ${
-                isRecording ? 'ring-2 ring-red-500' : ''
-              }`}
-            >
-              <Mic className={`w-6 h-6 ${isRecording ? 'text-red-500' : 'text-primary'}`} />
-            </Button>
-
-            <Button 
-              size="lg"
-              className="glass glass-hover p-4 rounded-full transition-all duration-300 opacity-50 cursor-not-allowed"
-            >
-              <Check className="w-6 h-6 text-primary" />
-            </Button>
-
-            <Button
-              size="lg" 
-              className="glass glass-hover p-4 rounded-full transition-all duration-300 opacity-50 cursor-not-allowed"
-            >
-              <Edit className="w-6 h-6 text-primary" />
-            </Button>
-          </div>
+          )}
         </div>
       </div>
 
@@ -376,15 +316,8 @@ export default function InboxPage() {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
-                    {selectedContact === contact.name && isSpeaking && (
-                      <div className="speaking-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                    )}
                     <Clock className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{contact.time}</span>
                   </div>
@@ -546,26 +479,6 @@ export default function InboxPage() {
               </Card>
             </>
           )}
-        </div>
-      </div>
-
-      {/* Status Bar */}
-      <div className="fixed bottom-0 left-0 right-0 glass border-t border-border/30 p-4 z-20">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span>Connected</span>
-            </div>
-            <span>•</span>
-            <span>Voice Profile: vale</span>
-            <span>•</span>
-            <span>Ready</span>
-          </div>
-          
-          <div className="text-sm text-muted-foreground">
-            Powered by Advanced AI
-          </div>
         </div>
       </div>
     </div>
