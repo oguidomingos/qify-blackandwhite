@@ -41,8 +41,9 @@ export async function GET(request: Request) {
     const period = searchParams.get('period') || 'all';
     const limit = parseInt(searchParams.get('limit') || '50');
     const activeOnly = searchParams.get('activeOnly') === 'true';
+    const chatType = searchParams.get('chatType') || 'all'; // 'all' | 'individual' | 'group'
 
-    console.log('💬 Chats API - Starting with real Evolution data...', { period, limit, activeOnly });
+    console.log('💬 Chats API - Starting with real Evolution data...', { period, limit, activeOnly, chatType });
 
     try {
       const controller = new AbortController();
@@ -154,22 +155,33 @@ export async function GET(request: Request) {
 
               const existingChat = chatMap.get(remoteJid);
               const msgTimestamp = msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now();
+              const isGroup = remoteJid.endsWith('@g.us');
+
+              // Get sender info for groups
+              const sender = msg.key?.participant || msg.participant;
+              const displayName = msg.pushName || msg.notifyName || existingChat?.pushName || remoteJid.split('@')[0];
 
               if (!existingChat || msgTimestamp > existingChat.lastMessageTime) {
                 chatMap.set(remoteJid, {
                   id: remoteJid,
                   remoteJid: remoteJid,
-                  pushName: msg.pushName || existingChat?.pushName || remoteJid.split('@')[0],
+                  pushName: displayName,
                   updatedAt: new Date(msgTimestamp).toISOString(),
                   lastMessageTime: msgTimestamp,
                   windowActive: (Date.now() - msgTimestamp) < (24 * 60 * 60 * 1000),
-                  messageCount: (existingChat?.messageCount || 0) + 1
+                  messageCount: (existingChat?.messageCount || 0) + 1,
+                  isGroup: isGroup,
+                  lastSender: sender || displayName
                 });
+              } else {
+                // Update message count for existing chat
+                existingChat.messageCount = (existingChat.messageCount || 0) + 1;
+                chatMap.set(remoteJid, existingChat);
               }
             });
 
             realChats = Array.from(chatMap.values());
-            console.log(`✅ Built ${realChats.length} chats from messages`);
+            console.log(`✅ Built ${realChats.length} chats from messages (${realChats.filter(c => c.isGroup).length} groups, ${realChats.filter(c => !c.isGroup).length} individual)`);
             workingEndpoint = 'messages-fallback';
           } else {
             throw lastError || new Error('All chat and message endpoints failed');
@@ -205,6 +217,47 @@ export async function GET(request: Request) {
         console.log('✅ Real Evolution chats fetched:', realChats.length);
       }
 
+      // Fetch contact names to enrich the data
+      console.log('📞 Fetching contact names from Evolution API...');
+      const contactsMap = new Map();
+
+      try {
+        const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findContacts/${INSTANCE_NAME}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_API_KEY!
+          },
+          body: JSON.stringify({})
+        });
+
+        if (contactsResponse.ok) {
+          const contactsData = await contactsResponse.json();
+          const contacts = Array.isArray(contactsData) ? contactsData : contactsData?.data || [];
+
+          contacts.forEach((contact: any) => {
+            const jid = contact.id || contact.remoteJid;
+            const name = contact.pushName || contact.name || contact.verifiedName;
+            if (jid && name) {
+              contactsMap.set(jid, name);
+            }
+          });
+
+          console.log(`✅ Loaded ${contactsMap.size} contact names`);
+        }
+      } catch (err) {
+        console.log('⚠️ Could not fetch contact names:', err);
+      }
+
+      // Enrich chats with contact names
+      realChats = realChats.map(chat => {
+        const contactName = contactsMap.get(chat.remoteJid);
+        if (contactName && contactName !== chat.remoteJid.split('@')[0]) {
+          return { ...chat, pushName: contactName };
+        }
+        return chat;
+      });
+
       // Apply time filter
       const timeFilter = getTimeFilter(period);
       let filteredChats = realChats;
@@ -214,6 +267,13 @@ export async function GET(request: Request) {
           const updatedTime = new Date(chat.updatedAt).getTime();
           return updatedTime >= timeFilter;
         });
+      }
+
+      // Apply chat type filter
+      if (chatType === 'individual') {
+        filteredChats = filteredChats.filter(chat => !chat.remoteJid.endsWith('@g.us'));
+      } else if (chatType === 'group') {
+        filteredChats = filteredChats.filter(chat => chat.remoteJid.endsWith('@g.us'));
       }
 
       // Apply active filter
@@ -230,7 +290,21 @@ export async function GET(request: Request) {
         .slice(0, limit)
         .map((chat, index) => {
           const phoneNumber = chat.remoteJid.split('@')[0];
-          const contactName = chat.pushName || phoneNumber;
+          const isGroup = chat.remoteJid.endsWith('@g.us');
+
+          // For groups, use the group name or ID; for individuals, use contact name or phone
+          let contactName = chat.pushName || phoneNumber;
+
+          // If still showing a phone-like number, try to make it more readable
+          if (contactName === phoneNumber && phoneNumber.match(/^\d+$/)) {
+            contactName = `+${phoneNumber}`;
+          }
+
+          // Add emoji indicator for groups
+          if (isGroup && !contactName.startsWith('👥')) {
+            contactName = `👥 ${contactName}`;
+          }
+
           const lastActivityAt = new Date(chat.updatedAt).getTime();
 
           return {
@@ -238,6 +312,7 @@ export async function GET(request: Request) {
             contactId: chat.remoteJid,
             contactName: contactName,
             channel: "whatsapp",
+            isGroup: isGroup,
             unreadCount: chat.windowActive ? 1 : 0, // Estimate based on window activity
             lastMessage: {
               text: chat.messageCount ? `${chat.messageCount} mensagens` : "Conversa ativa",
@@ -255,7 +330,9 @@ export async function GET(request: Request) {
               windowStart: chat.windowStart,
               windowExpires: chat.windowExpires,
               originalPushName: chat.pushName,
-              source: workingEndpoint
+              source: workingEndpoint,
+              isGroup: isGroup,
+              lastSender: chat.lastSender
             }
           };
         })
@@ -266,6 +343,8 @@ export async function GET(request: Request) {
       const activeChats = transformedChats.filter(c => c.isActive).length;
       const unreadChats = transformedChats.filter(c => c.unreadCount > 0).length;
       const totalUnreadMessages = transformedChats.reduce((sum, c) => sum + c.unreadCount, 0);
+      const groupChats = transformedChats.filter(c => c.isGroup).length;
+      const individualChats = transformedChats.filter(c => !c.isGroup).length;
 
       return NextResponse.json({
         success: true,
@@ -275,6 +354,8 @@ export async function GET(request: Request) {
           active: activeChats,
           unread: unreadChats,
           totalUnreadMessages: totalUnreadMessages,
+          groups: groupChats,
+          individuals: individualChats,
           period: period,
           timeRange: {
             from: timeFilter,
@@ -283,7 +364,7 @@ export async function GET(request: Request) {
         },
         fallback: workingEndpoint === 'messages-fallback',
         source: workingEndpoint || 'evolution_api',
-        message: `Fetched ${totalChats} chats from Evolution API`
+        message: `Fetched ${totalChats} chats (${individualChats} individual, ${groupChats} groups) from Evolution API`
       });
 
     } catch (apiError) {

@@ -65,6 +65,8 @@ interface InboxData {
     active: number;
     unread: number;
     totalUnreadMessages: number;
+    groups?: number;
+    individuals?: number;
   };
 }
 
@@ -80,15 +82,16 @@ export default function InboxPage() {
   const [error, setError] = useState<string | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [loadingConversation, setLoadingConversation] = useState(false);
+  const [chatType, setChatType] = useState<'all' | 'individual' | 'group'>('individual');
 
   useEffect(() => {
     const fetchInboxData = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        
-        // Fetch active chats from Evolution API
-        const response = await fetch('/api/evolution/chats?period=week&activeOnly=true&limit=50');
+
+        // Fetch active chats from Evolution API with chat type filter
+        const response = await fetch(`/api/evolution/chats?period=week&activeOnly=true&limit=50&chatType=${chatType}`);
         if (!response.ok) {
           throw new Error('Falha ao carregar chats');
         }
@@ -110,11 +113,11 @@ export default function InboxPage() {
     };
 
     fetchInboxData();
-    
+
     // Refresh every 30 seconds
     const interval = setInterval(fetchInboxData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [chatType]);
 
   // Transform chats data for display
   const pendingContacts = inboxData?.chats?.map(chat => {
@@ -271,11 +274,39 @@ export default function InboxPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-foreground">
-              Contatos Pendentes
+              Conversas
             </h2>
             <Badge variant="secondary" className="glass">
               {pendingContacts.length}
             </Badge>
+          </div>
+
+          {/* Chat Type Filter */}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={chatType === 'individual' ? 'default' : 'outline'}
+              onClick={() => setChatType('individual')}
+              className="flex-1"
+            >
+              Individuais
+            </Button>
+            <Button
+              size="sm"
+              variant={chatType === 'group' ? 'default' : 'outline'}
+              onClick={() => setChatType('group')}
+              className="flex-1"
+            >
+              Grupos
+            </Button>
+            <Button
+              size="sm"
+              variant={chatType === 'all' ? 'default' : 'outline'}
+              onClick={() => setChatType('all')}
+              className="flex-1"
+            >
+              Todos
+            </Button>
           </div>
 
           <div className="space-y-3">
@@ -307,7 +338,11 @@ export default function InboxPage() {
             {!isLoading && !error && pendingContacts.length === 0 && (
               <div className="text-center p-4 text-muted-foreground">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Nenhuma conversa ativa</p>
+                <p className="text-sm">
+                  {chatType === 'individual' && 'Nenhuma conversa individual'}
+                  {chatType === 'group' && 'Nenhum grupo'}
+                  {chatType === 'all' && 'Nenhuma conversa ativa'}
+                </p>
               </div>
             )}
             {pendingContacts.map((contact) => (
@@ -474,11 +509,15 @@ export default function InboxPage() {
                     <span className="text-foreground">{inboxData?.statistics.active || 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Não lidas</span>
-                    <span className="text-foreground">{inboxData?.statistics.totalUnreadMessages || 0}</span>
+                    <span className="text-muted-foreground">Individuais</span>
+                    <span className="text-foreground">{inboxData?.statistics.individuals || 0}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Total chats</span>
+                    <span className="text-muted-foreground">Grupos</span>
+                    <span className="text-foreground">{inboxData?.statistics.groups || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Total</span>
                     <span className="text-foreground">{inboxData?.statistics.total || 0}</span>
                   </div>
                 </CardContent>
