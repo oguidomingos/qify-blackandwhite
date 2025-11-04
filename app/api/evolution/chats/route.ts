@@ -159,7 +159,18 @@ export async function GET(request: Request) {
 
               // Get sender info for groups
               const sender = msg.key?.participant || msg.participant;
-              const displayName = msg.pushName || msg.notifyName || existingChat?.pushName || remoteJid.split('@')[0];
+
+              // Extract name from message - try multiple fields
+              const messageName = msg.pushName || msg.notifyName || msg.verifiedName || msg.name;
+              const existingName = existingChat?.pushName;
+
+              // Prefer the most complete name available
+              let displayName = messageName || existingName || remoteJid.split('@')[0];
+
+              // Don't replace a real name with a number
+              if (existingName && existingName !== remoteJid.split('@')[0] && !messageName) {
+                displayName = existingName;
+              }
 
               if (!existingChat || msgTimestamp > existingChat.lastMessageTime) {
                 chatMap.set(remoteJid, {
@@ -174,8 +185,14 @@ export async function GET(request: Request) {
                   lastSender: sender || displayName
                 });
               } else {
-                // Update message count for existing chat
+                // Update message count and possibly name for existing chat
                 existingChat.messageCount = (existingChat.messageCount || 0) + 1;
+
+                // Update name if we found a better one
+                if (messageName && messageName !== remoteJid.split('@')[0]) {
+                  existingChat.pushName = messageName;
+                }
+
                 chatMap.set(remoteJid, existingChat);
               }
             });
@@ -222,39 +239,73 @@ export async function GET(request: Request) {
       const contactsMap = new Map();
 
       try {
-        const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findContacts/${INSTANCE_NAME}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': EVOLUTION_API_KEY!
-          },
-          body: JSON.stringify({})
-        });
+        // Try multiple contact endpoints
+        const contactEndpoints = [
+          `/chat/findContacts/${INSTANCE_NAME}`,
+          `/contact/findAll/${INSTANCE_NAME}`,
+          `/chat/find-contacts/${INSTANCE_NAME}`
+        ];
 
-        if (contactsResponse.ok) {
+        let contactsResponse: Response | null = null;
+
+        for (const endpoint of contactEndpoints) {
+          try {
+            console.log(`🔍 Trying contacts endpoint: ${endpoint}`);
+            contactsResponse = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY!
+              },
+              body: JSON.stringify({})
+            });
+
+            if (contactsResponse.ok) {
+              console.log(`✅ Contacts endpoint working: ${endpoint}`);
+              break;
+            }
+          } catch (err) {
+            console.log(`❌ Contact endpoint ${endpoint} failed:`, err);
+          }
+        }
+
+        if (contactsResponse && contactsResponse.ok) {
           const contactsData = await contactsResponse.json();
           const contacts = Array.isArray(contactsData) ? contactsData : contactsData?.data || [];
 
+          console.log(`📦 Processing ${contacts.length} contacts...`);
+
           contacts.forEach((contact: any) => {
-            const jid = contact.id || contact.remoteJid;
-            const name = contact.pushName || contact.name || contact.verifiedName;
-            if (jid && name) {
+            // Try multiple ID fields
+            const jid = contact.id || contact.remoteJid || contact.jid;
+
+            // Try multiple name fields
+            const name = contact.pushName || contact.name || contact.verifiedName || contact.notify;
+
+            if (jid && name && name !== jid.split('@')[0]) {
               contactsMap.set(jid, name);
+              console.log(`  ✓ Mapped: ${jid} -> ${name}`);
             }
           });
 
-          console.log(`✅ Loaded ${contactsMap.size} contact names`);
+          console.log(`✅ Loaded ${contactsMap.size} contact names from Evolution API`);
+        } else {
+          console.log('⚠️ All contact endpoints failed, using names from messages only');
         }
       } catch (err) {
         console.log('⚠️ Could not fetch contact names:', err);
       }
 
-      // Enrich chats with contact names
+      // Enrich chats with contact names from API
       realChats = realChats.map(chat => {
-        const contactName = contactsMap.get(chat.remoteJid);
-        if (contactName && contactName !== chat.remoteJid.split('@')[0]) {
-          return { ...chat, pushName: contactName };
+        const apiContactName = contactsMap.get(chat.remoteJid);
+
+        // Prefer API name over message name if it's more complete
+        if (apiContactName && apiContactName !== chat.remoteJid.split('@')[0]) {
+          console.log(`  🔄 Enriching ${chat.remoteJid}: "${chat.pushName}" -> "${apiContactName}"`);
+          return { ...chat, pushName: apiContactName };
         }
+
         return chat;
       });
 
