@@ -27,17 +27,32 @@ export function VoiceAssistantPanel({
   const { isListening, isSpeaking, transcript, speak, startListening, stopListening, stopSpeaking } = useVoiceAssistant({
     onTranscript: handleTranscript,
     onSpeakingChange: (speaking) => {
-      if (!speaking && stage === 'analyzing') {
-        // IA terminou de falar o contexto, pode ouvir agora
-        setStage('idle');
+      console.log('🔊 Speaking change:', speaking, 'Current stage:', stage);
+      if (!speaking) {
+        // IA terminou de falar
+        if (stage === 'analyzing') {
+          // Após análise, voltar para idle para permitir nova instrução
+          console.log('✅ Analysis done, ready for instruction');
+          setStage('idle');
+        } else if (stage === 'suggesting') {
+          // Após falar as sugestões, manter no suggesting para escolher
+          console.log('✅ Suggestions ready');
+        }
       }
     }
   });
 
   function handleTranscript(text: string) {
-    console.log('Transcription:', text);
+    console.log('📝 Transcription:', text);
+    if (!text || text.trim().length === 0) {
+      console.log('❌ Empty transcription, ignoring');
+      setStage('idle');
+      return;
+    }
+
     setUserInstruction(text);
     setStage('processing');
+    stopListening();
 
     // Get AI suggestions based on user instruction
     generateSuggestions(text);
@@ -46,8 +61,10 @@ export function VoiceAssistantPanel({
   async function analyzeConversation() {
     if (!conversation || !conversation.recentMessages) return;
 
+    console.log('🔍 Starting conversation analysis...');
     setStage('analyzing');
     stopSpeaking();
+    stopListening();
 
     try {
       const response = await fetch('/api/ai/analyze-conversation', {
@@ -62,22 +79,24 @@ export function VoiceAssistantPanel({
       const data = await response.json();
 
       if (data.success) {
+        console.log('✅ Analysis complete, speaking summary');
         speak(data.summary);
+        // Note: stage will be reset to 'idle' by onSpeakingChange callback when speech ends
       } else {
-        speak("Desculpe, não consegui analisar a conversa.");
-        setStage('idle');
+        speak("Desculpe, não consegui analisar a conversa. Tente novamente.");
+        setTimeout(() => setStage('idle'), 3000);
       }
     } catch (error) {
-      console.error('Analysis error:', error);
-      speak("Ocorreu um erro ao analisar a conversa.");
-      setStage('idle');
+      console.error('❌ Analysis error:', error);
+      speak("Ocorreu um erro ao analisar a conversa. Tente novamente.");
+      setTimeout(() => setStage('idle'), 3000);
     }
   }
 
   async function generateSuggestions(instruction: string) {
     if (!conversation) return;
 
-    setStage('suggesting');
+    setStage('processing');
 
     try {
       const response = await fetch('/api/ai/suggest-response', {
@@ -94,15 +113,20 @@ export function VoiceAssistantPanel({
 
       if (data.success) {
         setSuggestions(data.suggestions);
-        speak("Preparei duas sugestões de resposta. Escolha uma ou peça para refazer.");
+        setStage('suggesting');
+        speak("Preparei duas sugestões de resposta. Escolha uma para enviar.");
       } else {
-        speak("Não consegui gerar sugestões.");
+        speak("Não consegui gerar sugestões. Por favor, tente novamente.");
         setStage('idle');
+        setSuggestions([]);
+        setUserInstruction('');
       }
     } catch (error) {
       console.error('Suggestion error:', error);
-      speak("Erro ao gerar sugestões.");
+      speak("Erro ao gerar sugestões. Por favor, tente novamente.");
       setStage('idle');
+      setSuggestions([]);
+      setUserInstruction('');
     }
   }
 
@@ -160,27 +184,55 @@ export function VoiceAssistantPanel({
 
   return (
     <div className="space-y-4">
+      {/* Status Display */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isSpeaking && (
+            <div className="flex items-center gap-2 text-sm text-primary">
+              <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+              <span>IA falando...</span>
+            </div>
+          )}
+          {isListening && (
+            <div className="flex items-center gap-2 text-sm text-red-500">
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+              <span>Ouvindo...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Reset Button - Always visible */}
+        {stage !== 'idle' && (
+          <Button variant="ghost" size="sm" onClick={handleCancel}>
+            <X className="h-4 w-4 mr-1" />
+            Cancelar
+          </Button>
+        )}
+      </div>
+
       {/* Main Control Button */}
-      {conversation && stage === 'idle' && (
+      {conversation && stage === 'idle' && !suggestions.length && (
         <Button
           onClick={analyzeConversation}
           className="w-full"
           variant="default"
+          disabled={isSpeaking}
         >
           Analisar Conversa com IA
         </Button>
       )}
 
-      {/* Voice Input */}
-      {(stage === 'idle' || stage === 'listening') && !suggestions.length && (
+      {/* Voice Input - Show after analysis or when idle */}
+      {stage === 'idle' && !suggestions.length && (
         <div className="flex items-center gap-2">
           <Button
             onClick={handleMicClick}
             size="lg"
             className={`flex-1 ${isListening ? 'bg-red-500 hover:bg-red-600' : ''}`}
+            disabled={isSpeaking}
           >
             <Mic className="w-5 h-5 mr-2" />
-            {isListening ? 'Ouvindo...' : 'Falar Instrução'}
+            {isListening ? 'Pare de falar para processar' : 'Ou fale uma instrução diretamente'}
           </Button>
         </div>
       )}
@@ -189,9 +241,25 @@ export function VoiceAssistantPanel({
       {stage === 'analyzing' && (
         <Card className="glass">
           <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Analisando conversa...</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">
+                  {isSpeaking ? 'IA falando o contexto...' : 'Analisando conversa...'}
+                </span>
+              </div>
+              {isSpeaking && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    stopSpeaking();
+                    setStage('idle');
+                  }}
+                >
+                  Pular
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
