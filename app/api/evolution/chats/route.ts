@@ -149,7 +149,12 @@ export async function GET(request: Request) {
             // Group messages by remoteJid to create chats
             const chatMap = new Map();
 
-            messages.forEach((msg: any) => {
+            // Log first message to see structure
+            if (messages.length > 0) {
+              console.log('📨 Sample message structure:', JSON.stringify(messages[0], null, 2).substring(0, 500));
+            }
+
+            messages.forEach((msg: any, idx: number) => {
               const remoteJid = msg.key?.remoteJid || msg.remoteJid;
               if (!remoteJid) return;
 
@@ -163,6 +168,18 @@ export async function GET(request: Request) {
               // Extract name from message - try multiple fields
               const messageName = msg.pushName || msg.notifyName || msg.verifiedName || msg.name;
               const existingName = existingChat?.pushName;
+
+              // Log name extraction for first few messages
+              if (idx < 3) {
+                console.log(`📝 Message ${idx} name extraction:`, {
+                  remoteJid: remoteJid.split('@')[0],
+                  pushName: msg.pushName,
+                  notifyName: msg.notifyName,
+                  verifiedName: msg.verifiedName,
+                  name: msg.name,
+                  finalName: messageName
+                });
+              }
 
               // Prefer the most complete name available
               let displayName = messageName || existingName || remoteJid.split('@')[0];
@@ -234,76 +251,115 @@ export async function GET(request: Request) {
         console.log('✅ Real Evolution chats fetched:', realChats.length);
       }
 
-      // Fetch contact names to enrich the data
-      console.log('📞 Fetching contact names from Evolution API...');
-      const contactsMap = new Map();
+      // Fetch WhatsApp profile info (push name) for each contact
+      console.log('📞 Fetching WhatsApp profile names for contacts...');
+      const profileNamesMap = new Map();
 
-      try {
-        // Try multiple contact endpoints
-        const contactEndpoints = [
-          `/chat/findContacts/${INSTANCE_NAME}`,
-          `/contact/findAll/${INSTANCE_NAME}`,
-          `/chat/find-contacts/${INSTANCE_NAME}`
-        ];
+      // Get unique phone numbers from chats (excluding groups)
+      const phoneNumbers = realChats
+        .filter(chat => !chat.remoteJid.endsWith('@g.us'))
+        .map(chat => chat.remoteJid)
+        .slice(0, 30); // Limit to first 30 to avoid timeout
 
-        let contactsResponse: Response | null = null;
+      console.log(`📱 Fetching WhatsApp profiles for ${phoneNumbers.length} contacts...`);
 
-        for (const endpoint of contactEndpoints) {
-          try {
-            console.log(`🔍 Trying contacts endpoint: ${endpoint}`);
-            contactsResponse = await fetch(`${EVOLUTION_BASE_URL}${endpoint}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': EVOLUTION_API_KEY!
-              },
-              body: JSON.stringify({})
-            });
+      // Fetch profile info for each contact in parallel (batches of 10)
+      const batchSize = 10;
+      for (let i = 0; i < phoneNumbers.length; i += batchSize) {
+        const batch = phoneNumbers.slice(i, i + batchSize);
 
-            if (contactsResponse.ok) {
-              console.log(`✅ Contacts endpoint working: ${endpoint}`);
-              break;
+        const results = await Promise.allSettled(
+          batch.map(async (remoteJid) => {
+            // Try multiple profile endpoints
+            const profileEndpoints = [
+              `/chat/fetchProfile/${INSTANCE_NAME}`,
+              `/chat/whatsappProfile/${INSTANCE_NAME}`,
+              `/profile/${INSTANCE_NAME}`
+            ];
+
+            for (const endpoint of profileEndpoints) {
+              try {
+                const number = remoteJid.split('@')[0];
+                const profileResponse = await fetch(
+                  `${EVOLUTION_BASE_URL}${endpoint}`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'apikey': EVOLUTION_API_KEY!
+                    },
+                    body: JSON.stringify({ number: number })
+                  }
+                );
+
+                if (profileResponse.ok) {
+                  const profileData = await profileResponse.json();
+
+                  // Try multiple name fields
+                  const pushName = profileData?.name ||
+                                   profileData?.pushName ||
+                                   profileData?.notify ||
+                                   profileData?.verifiedName ||
+                                   profileData?.data?.name ||
+                                   profileData?.data?.pushName;
+
+                  if (pushName && pushName !== number) {
+                    profileNamesMap.set(remoteJid, pushName);
+                    console.log(`  ✓ WhatsApp Profile: ${number} -> "${pushName}"`);
+                    return;
+                  }
+                }
+              } catch (err) {
+                // Try next endpoint
+              }
             }
-          } catch (err) {
-            console.log(`❌ Contact endpoint ${endpoint} failed:`, err);
-          }
-        }
+          })
+        );
+      }
 
-        if (contactsResponse && contactsResponse.ok) {
+      console.log(`✅ Loaded ${profileNamesMap.size} profile names from WhatsApp`);
+
+      // Also try the contacts endpoint as fallback
+      try {
+        const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findContacts/${INSTANCE_NAME}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_API_KEY!
+          },
+          body: JSON.stringify({})
+        });
+
+        if (contactsResponse.ok) {
           const contactsData = await contactsResponse.json();
           const contacts = Array.isArray(contactsData) ? contactsData : contactsData?.data || [];
 
-          console.log(`📦 Processing ${contacts.length} contacts...`);
+          console.log(`📦 Processing ${contacts.length} contacts from API...`);
 
           contacts.forEach((contact: any) => {
-            // Try multiple ID fields
             const jid = contact.id || contact.remoteJid || contact.jid;
-
-            // Try multiple name fields
             const name = contact.pushName || contact.name || contact.verifiedName || contact.notify;
 
-            if (jid && name && name !== jid.split('@')[0]) {
-              contactsMap.set(jid, name);
-              console.log(`  ✓ Mapped: ${jid} -> ${name}`);
+            if (jid && name && name !== jid.split('@')[0] && !profileNamesMap.has(jid)) {
+              profileNamesMap.set(jid, name);
+              console.log(`  ✓ Contact API: ${jid.split('@')[0]} -> ${name}`);
             }
           });
 
-          console.log(`✅ Loaded ${contactsMap.size} contact names from Evolution API`);
-        } else {
-          console.log('⚠️ All contact endpoints failed, using names from messages only');
+          console.log(`✅ Total names collected: ${profileNamesMap.size}`);
         }
       } catch (err) {
-        console.log('⚠️ Could not fetch contact names:', err);
+        console.log('⚠️ Contacts API failed, using profile names only');
       }
 
-      // Enrich chats with contact names from API
+      // Enrich chats with profile names
       realChats = realChats.map(chat => {
-        const apiContactName = contactsMap.get(chat.remoteJid);
+        const profileName = profileNamesMap.get(chat.remoteJid);
 
-        // Prefer API name over message name if it's more complete
-        if (apiContactName && apiContactName !== chat.remoteJid.split('@')[0]) {
-          console.log(`  🔄 Enriching ${chat.remoteJid}: "${chat.pushName}" -> "${apiContactName}"`);
-          return { ...chat, pushName: apiContactName };
+        // Prefer profile name (WhatsApp public name) over everything
+        if (profileName && profileName !== chat.remoteJid.split('@')[0]) {
+          console.log(`  🔄 Using profile name for ${chat.remoteJid.split('@')[0]}: "${profileName}"`);
+          return { ...chat, pushName: profileName };
         }
 
         return chat;
