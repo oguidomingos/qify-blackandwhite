@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MessageSquare, Mic, Check, Edit, Users, Clock, Loader2 } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
+import { VoiceAssistantPanel } from "@/components/voice-assistant-panel";
 
 interface Contact {
   _id: string;
@@ -151,7 +152,6 @@ export default function InboxPage() {
   const handleContactClick = async (contactId: string, contactName: string, remoteJid: string) => {
     setSelectedContact(contactName);
     setSelectedContactId(remoteJid);
-    setIsSpeaking(true);
     setLoadingConversation(true);
 
     try {
@@ -169,11 +169,13 @@ export default function InboxPage() {
     } finally {
       setLoadingConversation(false);
     }
+  };
 
-    // Simulate AI speaking
-    setTimeout(() => {
-      setIsSpeaking(false);
-    }, 3000);
+  const handleMessageSent = () => {
+    // Refresh conversation after sending
+    if (selectedContactId) {
+      handleContactClick('temp', selectedContact || '', selectedContactId);
+    }
   };
 
   const toggleRecording = () => {
@@ -436,6 +438,26 @@ export default function InboxPage() {
                       <span className="text-muted-foreground">Enviadas</span>
                       <span className="text-foreground">{conversation.statistics.outbound}</span>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Voice AI Assistant */}
+              {conversation && selectedContactId && (
+                <Card className="glass border-primary/20">
+                  <CardHeader>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Mic className="h-4 w-4" />
+                      Assistente de Voz
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <VoiceAssistantPanel
+                      conversation={conversation}
+                      contactName={selectedContact || ''}
+                      contactId={selectedContactId}
+                      onMessageSent={handleMessageSent}
+                    />
                   </CardContent>
                 </Card>
               )}
