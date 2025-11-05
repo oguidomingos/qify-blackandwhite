@@ -10,11 +10,13 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [hasMicrophonePermission, setHasMicrophonePermission] = useState(false);
 
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   const speakingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const checkSpeakingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const microphoneStreamRef = useRef<MediaStream | null>(null);
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -74,14 +76,58 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
     };
   }, [onTranscript]);
 
-  const startListening = useCallback(() => {
-    if (recognitionRef.current && !isListening) {
-      setError(null);
-      setTranscript('');
+  // Request microphone permission
+  const requestMicrophonePermission = useCallback(async () => {
+    console.log('🎤 Requesting microphone permission...');
+
+    try {
+      // Request microphone access explicitly
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      microphoneStreamRef.current = stream;
+      setHasMicrophonePermission(true);
+      console.log('✅ Microphone permission granted');
+      return true;
+    } catch (err: any) {
+      console.error('❌ Microphone permission denied:', err);
+
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setError('Permissão do microfone negada. Por favor, permita o acesso ao microfone nas configurações do navegador.');
+      } else if (err.name === 'NotFoundError') {
+        setError('Nenhum microfone encontrado. Verifique se há um microfone conectado.');
+      } else {
+        setError('Erro ao acessar o microfone: ' + err.message);
+      }
+
+      setHasMicrophonePermission(false);
+      return false;
+    }
+  }, []);
+
+  const startListening = useCallback(async () => {
+    if (!recognitionRef.current || isListening) {
+      return;
+    }
+
+    // First, request microphone permission if we don't have it yet
+    if (!hasMicrophonePermission) {
+      const granted = await requestMicrophonePermission();
+      if (!granted) {
+        console.error('❌ Cannot start listening without microphone permission');
+        return;
+      }
+    }
+
+    setError(null);
+    setTranscript('');
+
+    try {
       recognitionRef.current.start();
       setIsListening(true);
+    } catch (err: any) {
+      console.error('❌ Error starting recognition:', err);
+      setError('Erro ao iniciar reconhecimento de voz: ' + err.message);
     }
-  }, [isListening]);
+  }, [isListening, hasMicrophonePermission, requestMicrophonePermission]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current && isListening) {
@@ -196,11 +242,32 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Clear timers
       if (speakingTimeoutRef.current) {
         clearTimeout(speakingTimeoutRef.current);
       }
       if (checkSpeakingIntervalRef.current) {
         clearInterval(checkSpeakingIntervalRef.current);
+      }
+
+      // Stop microphone stream
+      if (microphoneStreamRef.current) {
+        microphoneStreamRef.current.getTracks().forEach(track => track.stop());
+        console.log('🧹 Cleanup: Microphone stream stopped');
+      }
+
+      // Stop recognition
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          // Ignore errors on cleanup
+        }
+      }
+
+      // Stop speech synthesis
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
       }
     };
   }, []);
