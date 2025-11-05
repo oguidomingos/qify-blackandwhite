@@ -76,19 +76,28 @@ export function VoiceAssistantPanel({
         })
       });
 
-      const data = await response.json();
+      console.log('📡 API Response status:', response.status);
 
-      if (data.success) {
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('📦 API Response data:', data);
+
+      if (data.success && data.summary) {
         console.log('✅ Analysis complete, speaking summary');
         speak(data.summary);
         // Note: stage will be reset to 'idle' by onSpeakingChange callback when speech ends
       } else {
-        speak("Desculpe, não consegui analisar a conversa. Tente novamente.");
+        const errorMsg = data.error || 'Erro desconhecido';
+        console.error('❌ API error:', errorMsg);
+        speak(`Desculpe, ocorreu um erro: ${errorMsg}`);
         setTimeout(() => setStage('idle'), 3000);
       }
     } catch (error) {
       console.error('❌ Analysis error:', error);
-      speak("Ocorreu um erro ao analisar a conversa. Tente novamente.");
+      speak("Ocorreu um erro ao conectar com a IA. Verifique se a API key está configurada.");
       setTimeout(() => setStage('idle'), 3000);
     }
   }
@@ -96,6 +105,7 @@ export function VoiceAssistantPanel({
   async function generateSuggestions(instruction: string) {
     if (!conversation) return;
 
+    console.log('💡 Generating suggestions for instruction:', instruction);
     setStage('processing');
 
     try {
@@ -109,21 +119,30 @@ export function VoiceAssistantPanel({
         })
       });
 
-      const data = await response.json();
+      console.log('📡 Suggestions API status:', response.status);
 
-      if (data.success) {
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('📦 Suggestions data:', data);
+
+      if (data.success && data.suggestions && data.suggestions.length > 0) {
         setSuggestions(data.suggestions);
         setStage('suggesting');
         speak("Preparei duas sugestões de resposta. Escolha uma para enviar.");
       } else {
-        speak("Não consegui gerar sugestões. Por favor, tente novamente.");
+        const errorMsg = data.error || 'Não consegui gerar sugestões';
+        console.error('❌ Suggestions error:', errorMsg);
+        speak(`${errorMsg}. Tente novamente.`);
         setStage('idle');
         setSuggestions([]);
         setUserInstruction('');
       }
     } catch (error) {
-      console.error('Suggestion error:', error);
-      speak("Erro ao gerar sugestões. Por favor, tente novamente.");
+      console.error('❌ Suggestion error:', error);
+      speak("Erro ao gerar sugestões. Verifique se a API key está configurada.");
       setStage('idle');
       setSuggestions([]);
       setUserInstruction('');
