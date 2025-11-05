@@ -47,7 +47,9 @@ export function useVoiceConversation({
 
       if (SpeechRecognition) {
         recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = true;
+
+        // Try with continuous=false to reduce network issues
+        recognitionRef.current.continuous = false; // Changed from true to false
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'pt-BR';
         recognitionRef.current.maxAlternatives = 1;
@@ -57,6 +59,8 @@ export function useVoiceConversation({
           interimResults: recognitionRef.current.interimResults,
           lang: recognitionRef.current.lang
         });
+
+        console.log('💡 Tip: If you see network errors, they are usually temporary. The system will retry automatically.');
 
         recognitionRef.current.onresult = (event: any) => {
           console.log('🎤 onresult event fired! Results:', event.results.length);
@@ -102,12 +106,15 @@ export function useVoiceConversation({
           if (event.error === 'network') {
             console.log('🌐 Network error detected. Attempting to reconnect...');
 
-            // Don't show scary error message to user
-            if (networkRetryCountRef.current < 3) {
+            // Don't show scary error message to user - try more times
+            if (networkRetryCountRef.current < 5) { // Increased from 3 to 5
               networkRetryCountRef.current += 1;
-              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/3`);
+              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/5`);
 
-              // Try to restart recognition after a short delay
+              // Try to restart recognition after a longer delay
+              const retryDelay = 1500 + (networkRetryCountRef.current * 500); // Progressive backoff: 2s, 2.5s, 3s, 3.5s, 4s
+              console.log(`⏱️ Waiting ${retryDelay}ms before retry...`);
+
               setTimeout(() => {
                 if (currentTurn === 'user' && !isRestartingRef.current) {
                   console.log('🔄 Restarting recognition after network error...');
@@ -130,16 +137,20 @@ export function useVoiceConversation({
                       }
                     } catch (err) {
                       console.error('Failed to restart:', err);
-                      setError('Erro de conexão. Clique no microfone para tentar novamente.');
+                      setError('Erro de conexão. Clique no microfone para reiniciar.');
+                      setIsListening(false);
+                      setCurrentTurn('idle');
                     } finally {
                       isRestartingRef.current = false;
                     }
-                  }, 500);
+                  }, 800); // Increased delay before restart
                 }
-              }, 1000);
+              }, retryDelay);
             } else {
-              console.error('❌ Max retries reached');
-              setError('Erro de conexão. Clique no microfone para tentar novamente.');
+              console.error('❌ Max retries reached (5 attempts)');
+              setError('Erro de conexão persistente. Clique no microfone para reiniciar.');
+              setIsListening(false);
+              setCurrentTurn('idle');
               networkRetryCountRef.current = 0; // Reset for next time
             }
             return;
@@ -159,10 +170,24 @@ export function useVoiceConversation({
         };
 
         recognitionRef.current.onend = () => {
-          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'Will restart:', currentTurn === 'user');
+          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn);
 
-          // Don't auto-restart anymore, let the app control it
-          setIsListening(false);
+          // With continuous=false, we need to restart if still in user turn
+          if (currentTurn === 'user' && !isRestartingRef.current && isListening) {
+            console.log('🔄 Auto-restarting recognition (continuous=false mode)');
+            setTimeout(() => {
+              try {
+                if (recognitionRef.current && currentTurn === 'user') {
+                  recognitionRef.current.start();
+                }
+              } catch (err) {
+                console.error('❌ Error auto-restarting:', err);
+                setIsListening(false);
+              }
+            }, 100);
+          } else {
+            setIsListening(false);
+          }
         };
 
         recognitionRef.current.onnomatch = () => {

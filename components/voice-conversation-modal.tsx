@@ -91,6 +91,11 @@ export function VoiceConversationModal({
     console.log('🛑 User clicked to stop listening');
     if (!transcript || transcript.trim().length === 0) {
       console.log('❌ No transcript yet, not processing');
+
+      // If there's an error, allow user to stop and close
+      if (error) {
+        closeConversation();
+      }
       return;
     }
 
@@ -362,7 +367,18 @@ export function VoiceConversationModal({
 
               {error && (
                 <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                  <p className="text-sm text-red-600">{error}</p>
+                  <p className="text-sm text-red-600 mb-2">{error}</p>
+                  <Button
+                    onClick={() => {
+                      console.log('🔄 User clicked retry button');
+                      startListening();
+                    }}
+                    size="sm"
+                    variant="outline"
+                    className="w-full border-red-500/50 hover:bg-red-500/10"
+                  >
+                    🔄 Tentar Novamente
+                  </Button>
                 </div>
               )}
             </div>
