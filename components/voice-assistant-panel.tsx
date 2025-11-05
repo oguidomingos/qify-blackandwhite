@@ -1,19 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Mic, Send, X, Loader2, Edit2, Check } from "lucide-react";
+import { Mic, Send, X, Loader2, MessageSquare } from "lucide-react";
 import { useVoiceAssistant } from "@/hooks/use-voice-assistant";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 
 interface VoiceAssistantPanelProps {
   conversation: any | null;
@@ -22,119 +19,86 @@ interface VoiceAssistantPanelProps {
   onMessageSent: () => void;
 }
 
+type ConversationStep =
+  | 'idle'
+  | 'recording'
+  | 'confirming'
+  | 'generating'
+  | 'suggesting';
+
 export function VoiceAssistantPanel({
   conversation,
   contactName,
   contactId,
   onMessageSent
 }: VoiceAssistantPanelProps) {
-  const [stage, setStage] = useState<'idle' | 'analyzing' | 'listening' | 'processing' | 'suggesting'>('idle');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [step, setStep] = useState<ConversationStep>('idle');
   const [userInstruction, setUserInstruction] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [editableInstruction, setEditableInstruction] = useState('');
+  const [aiMessage, setAiMessage] = useState('');
 
   const { isListening, isSpeaking, transcript, speak, startListening, stopListening, stopSpeaking } = useVoiceAssistant({
     onTranscript: handleTranscript,
     onSpeakingChange: (speaking) => {
-      console.log('🔊 Speaking change:', speaking, 'Current stage:', stage);
-      if (!speaking) {
-        // IA terminou de falar
-        if (stage === 'analyzing') {
-          // Após análise, voltar para idle para permitir nova instrução
-          console.log('✅ Analysis done, ready for instruction');
-          setStage('idle');
-        } else if (stage === 'suggesting') {
-          // Após falar as sugestões, manter no suggesting para escolher
-          console.log('✅ Suggestions ready');
-        }
+      console.log('🔊 Speaking change:', speaking, 'Current step:', step);
+      if (!speaking && step === 'confirming') {
+        // AI finished confirming, ready for user response
+        console.log('✅ AI finished confirming');
       }
     }
   });
 
+  function openVoiceModal() {
+    setIsModalOpen(true);
+    setStep('recording');
+    setTimeout(() => startListening(), 300); // Small delay for modal animation
+  }
+
+  function closeVoiceModal() {
+    setIsModalOpen(false);
+    setStep('idle');
+    setUserInstruction('');
+    setAiMessage('');
+    setSuggestions([]);
+    stopListening();
+    stopSpeaking();
+  }
+
   function handleTranscript(text: string) {
-    console.log('📝 Transcription:', text);
+    console.log('📝 Final transcript:', text);
     if (!text || text.trim().length === 0) {
-      console.log('❌ Empty transcription, ignoring');
-      setStage('idle');
+      console.log('❌ Empty transcription');
       return;
     }
 
     setUserInstruction(text);
-    setEditableInstruction(text);
     stopListening();
-    setStage('idle'); // Back to idle while user confirms
+    setStep('confirming');
 
-    // Show confirmation dialog
-    setShowConfirmDialog(true);
+    // AI confirms what it heard
+    const confirmMessage = `Entendi. Você quer que eu ${text}. É isso mesmo?`;
+    setAiMessage(confirmMessage);
+    speak(confirmMessage);
   }
 
-  function handleConfirmInstruction() {
-    setShowConfirmDialog(false);
-    setStage('processing');
-
-    // Get AI suggestions based on user instruction
-    generateSuggestions(editableInstruction);
+  function handleConfirmYes() {
+    setStep('generating');
+    setAiMessage('Perfeito! Gerando sugestões de resposta...');
+    speak('Perfeito! Gerando sugestões.');
+    generateSuggestions(userInstruction);
   }
 
-  function handleCancelInstruction() {
-    setShowConfirmDialog(false);
+  function handleConfirmNo() {
+    setStep('recording');
     setUserInstruction('');
-    setEditableInstruction('');
-    setStage('idle');
-  }
-
-  async function analyzeConversation() {
-    if (!conversation || !conversation.recentMessages) return;
-
-    console.log('🔍 Starting conversation analysis...');
-    setStage('analyzing');
-    stopSpeaking();
-    stopListening();
-
-    try {
-      const response = await fetch('/api/ai/analyze-conversation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: conversation.recentMessages,
-          contactName: contactName
-        })
-      });
-
-      console.log('📡 API Response status:', response.status);
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('📦 API Response data:', data);
-
-      if (data.success && data.summary) {
-        console.log('✅ Analysis complete, speaking summary');
-        speak(data.summary);
-        // Note: stage will be reset to 'idle' by onSpeakingChange callback when speech ends
-      } else {
-        const errorMsg = data.error || 'Erro desconhecido';
-        console.error('❌ API error:', errorMsg);
-        speak(`Desculpe, ocorreu um erro: ${errorMsg}`);
-        setTimeout(() => setStage('idle'), 3000);
-      }
-    } catch (error) {
-      console.error('❌ Analysis error:', error);
-      speak("Ocorreu um erro ao conectar com a IA. Verifique se a API key está configurada.");
-      setTimeout(() => setStage('idle'), 3000);
-    }
+    setAiMessage('');
+    speak('Ok, fale novamente sua instrução.');
+    setTimeout(() => startListening(), 2000);
   }
 
   async function generateSuggestions(instruction: string) {
-    if (!conversation) return;
-
-    console.log('💡 Generating suggestions for instruction:', instruction);
-    setStage('processing');
-
     try {
       const response = await fetch('/api/ai/suggest-response', {
         method: 'POST',
@@ -146,33 +110,24 @@ export function VoiceAssistantPanel({
         })
       });
 
-      console.log('📡 Suggestions API status:', response.status);
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
       const data = await response.json();
-      console.log('📦 Suggestions data:', data);
 
       if (data.success && data.suggestions && data.suggestions.length > 0) {
         setSuggestions(data.suggestions);
-        setStage('suggesting');
-        speak("Preparei duas sugestões de resposta. Escolha uma para enviar.");
+        setStep('suggesting');
+        setAiMessage('Aqui estão minhas sugestões. Escolha uma para enviar:');
       } else {
-        const errorMsg = data.error || 'Não consegui gerar sugestões';
-        console.error('❌ Suggestions error:', errorMsg);
-        speak(`${errorMsg}. Tente novamente.`);
-        setStage('idle');
-        setSuggestions([]);
-        setUserInstruction('');
+        setAiMessage('Desculpe, não consegui gerar sugestões. Vamos tentar novamente?');
+        speak('Desculpe, não consegui gerar sugestões.');
+        setTimeout(() => {
+          setStep('recording');
+          startListening();
+        }, 3000);
       }
     } catch (error) {
-      console.error('❌ Suggestion error:', error);
-      speak("Erro ao gerar sugestões. Verifique se a API key está configurada.");
-      setStage('idle');
-      setSuggestions([]);
-      setUserInstruction('');
+      console.error('❌ Error generating suggestions:', error);
+      setAiMessage('Erro ao gerar sugestões. Tente novamente.');
+      speak('Erro ao gerar sugestões.');
     }
   }
 
@@ -193,12 +148,12 @@ export function VoiceAssistantPanel({
 
       if (data.success) {
         speak("Mensagem enviada com sucesso!");
-        setSuggestions([]);
-        setUserInstruction('');
-        setStage('idle');
-        onMessageSent();
+        setTimeout(() => {
+          closeVoiceModal();
+          onMessageSent();
+        }, 2000);
       } else {
-        speak("Erro ao enviar mensagem. Tente novamente.");
+        speak("Erro ao enviar mensagem.");
       }
     } catch (error) {
       console.error('Send error:', error);
@@ -208,247 +163,185 @@ export function VoiceAssistantPanel({
     }
   }
 
-  function handleMicClick() {
-    if (isListening) {
-      stopListening();
-    } else {
-      if (isSpeaking) {
-        stopSpeaking();
-      }
-      setStage('listening');
-      startListening();
-    }
-  }
-
-  function handleCancel() {
-    setSuggestions([]);
-    setUserInstruction('');
-    setStage('idle');
-    stopSpeaking();
-    stopListening();
-  }
-
   return (
-    <div className="space-y-4">
-      {/* Status Display */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {isSpeaking && (
-            <div className="flex items-center gap-2 text-sm text-primary">
-              <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-              <span>IA falando...</span>
-            </div>
-          )}
-          {isListening && (
-            <div className="flex items-center gap-2 text-sm text-red-500">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-              <span>Ouvindo...</span>
-            </div>
-          )}
-        </div>
+    <>
+      {/* Trigger Button */}
+      <Button
+        onClick={openVoiceModal}
+        size="lg"
+        className="w-full bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
+      >
+        <Mic className="w-5 h-5 mr-2" />
+        Conversar com Assistente de Voz
+      </Button>
 
-        {/* Reset Button - Always visible */}
-        {stage !== 'idle' && (
-          <Button variant="ghost" size="sm" onClick={handleCancel}>
-            <X className="h-4 w-4 mr-1" />
-            Cancelar
-          </Button>
-        )}
-      </div>
-
-      {/* Main Control Button */}
-      {conversation && stage === 'idle' && !suggestions.length && (
-        <Button
-          onClick={analyzeConversation}
-          className="w-full"
-          variant="default"
-          disabled={isSpeaking}
-        >
-          Analisar Conversa com IA
-        </Button>
-      )}
-
-      {/* Voice Input - Show after analysis or when idle */}
-      {stage === 'idle' && !suggestions.length && (
-        <>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={handleMicClick}
-              size="lg"
-              className={`flex-1 ${isListening ? 'bg-red-500 hover:bg-red-600 animate-pulse' : ''}`}
-              disabled={isSpeaking}
-            >
-              <Mic className="w-5 h-5 mr-2" />
-              {isListening ? 'Clique para parar' : 'Falar Instrução'}
-            </Button>
-          </div>
-
-          {/* Real-time Transcription Display */}
-          {isListening && (
-            <Card className="glass border-red-500/50 bg-red-500/5">
-              <CardContent className="p-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex gap-1">
-                      <div className="w-1 h-8 bg-red-500 animate-pulse" style={{ animationDelay: '0ms' }}></div>
-                      <div className="w-1 h-6 bg-red-500 animate-pulse" style={{ animationDelay: '150ms' }}></div>
-                      <div className="w-1 h-10 bg-red-500 animate-pulse" style={{ animationDelay: '300ms' }}></div>
-                      <div className="w-1 h-5 bg-red-500 animate-pulse" style={{ animationDelay: '450ms' }}></div>
-                      <div className="w-1 h-9 bg-red-500 animate-pulse" style={{ animationDelay: '600ms' }}></div>
-                    </div>
-                    <span className="text-sm font-semibold text-red-500">Gravando...</span>
-                  </div>
-                  <div className="min-h-[60px] p-3 bg-background/50 rounded-md">
-                    {transcript ? (
-                      <p className="text-sm text-foreground">{transcript}</p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">Fale agora...</p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </>
-      )}
-
-      {/* Status Messages */}
-      {stage === 'analyzing' && (
-        <Card className="glass">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm">
-                  {isSpeaking ? 'IA falando o contexto...' : 'Analisando conversa...'}
-                </span>
-              </div>
-              {isSpeaking && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    stopSpeaking();
-                    setStage('idle');
-                  }}
-                >
-                  Pular
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {stage === 'processing' && (
-        <Card className="glass">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Gerando sugestões...</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* User Instruction Display */}
-      {userInstruction && (
-        <Card className="glass">
-          <CardContent className="p-4">
-            <p className="text-sm font-semibold mb-1">Sua instrução:</p>
-            <p className="text-sm text-muted-foreground">"{userInstruction}"</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Suggestions */}
-      {suggestions.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold">Sugestões de Resposta:</h4>
-            <Button variant="ghost" size="sm" onClick={handleCancel}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {suggestions.map((suggestion, index) => (
-            <Card key={index} className="glass cursor-pointer hover:bg-primary/5">
-              <CardContent className="p-4">
-                <p className="text-sm mb-3">{suggestion}</p>
-                <Button
-                  onClick={() => sendMessage(suggestion)}
-                  disabled={sending}
-                  size="sm"
-                  className="w-full"
-                >
-                  {sending ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <Send className="h-4 w-4 mr-2" />
-                  )}
-                  Enviar esta resposta
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSuggestions([]);
-              setStage('listening');
-              startListening();
-            }}
-            className="w-full"
-          >
-            Refazer instrução
-          </Button>
-        </div>
-      )}
-
-      {/* Confirmation/Edit Dialog */}
-      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Confirmar Instrução</DialogTitle>
-            <DialogDescription>
-              Revise ou edite sua instrução antes de gerar as sugestões de resposta.
-            </DialogDescription>
+      {/* Voice Modal */}
+      <Dialog open={isModalOpen} onOpenChange={closeVoiceModal}>
+        <DialogContent className="sm:max-w-[600px] min-h-[500px] p-0 gap-0 bg-gradient-to-b from-background to-background/95">
+          <DialogHeader className="p-6 pb-2">
+            <DialogTitle className="text-center text-2xl">
+              Assistente de Voz
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Sua instrução:</label>
-              <Textarea
-                value={editableInstruction}
-                onChange={(e) => setEditableInstruction(e.target.value)}
-                placeholder="Digite sua instrução aqui..."
-                className="min-h-[100px] resize-none"
-              />
-              <p className="text-xs text-muted-foreground">
-                Exemplo: "Pergunte quando ele quer receber o orçamento"
-              </p>
+          <div className="flex flex-col items-center justify-center flex-1 p-8 space-y-8">
+            {/* Voice Visualization Circle */}
+            <div className="relative">
+              {/* Outer rings */}
+              {(isListening || isSpeaking) && (
+                <>
+                  <div className="absolute inset-0 rounded-full bg-primary/10 animate-ping" style={{ animationDuration: '2s' }}></div>
+                  <div className="absolute inset-[-20px] rounded-full bg-primary/5 animate-ping" style={{ animationDuration: '3s' }}></div>
+                </>
+              )}
+
+              {/* Main circle */}
+              <div className={`relative w-40 h-40 rounded-full flex items-center justify-center transition-all duration-300 ${
+                isListening
+                  ? 'bg-red-500/20 border-4 border-red-500'
+                  : isSpeaking
+                  ? 'bg-blue-500/20 border-4 border-blue-500'
+                  : 'bg-primary/20 border-4 border-primary/50'
+              }`}>
+                {/* Inner animated circle */}
+                <div className={`w-32 h-32 rounded-full flex items-center justify-center ${
+                  isListening
+                    ? 'bg-red-500 animate-pulse'
+                    : isSpeaking
+                    ? 'bg-blue-500 animate-pulse'
+                    : 'bg-primary/50'
+                }`}>
+                  <Mic className="w-16 h-16 text-white" />
+                </div>
+              </div>
+            </div>
+
+            {/* Status Text */}
+            <div className="text-center space-y-2">
+              <h3 className="text-xl font-semibold">
+                {step === 'recording' && 'Estou ouvindo...'}
+                {step === 'confirming' && 'Confirmando instrução'}
+                {step === 'generating' && 'Gerando sugestões...'}
+                {step === 'suggesting' && 'Escolha uma sugestão'}
+              </h3>
+
+              {/* Real-time transcript or AI message */}
+              <div className="min-h-[80px] max-w-md mx-auto">
+                {step === 'recording' && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Fale sua instrução agora</p>
+                    {transcript && (
+                      <div className="p-4 bg-muted rounded-lg">
+                        <p className="text-base">{transcript}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(step === 'confirming' || step === 'generating') && aiMessage && (
+                  <div className="p-4 bg-primary/10 rounded-lg border border-primary/20">
+                    <p className="text-base">{aiMessage}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="w-full max-w-md space-y-3">
+              {step === 'recording' && isListening && (
+                <Button
+                  onClick={() => stopListening()}
+                  size="lg"
+                  variant="destructive"
+                  className="w-full"
+                >
+                  Parar Gravação
+                </Button>
+              )}
+
+              {step === 'confirming' && !isSpeaking && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    onClick={handleConfirmNo}
+                    size="lg"
+                    variant="outline"
+                  >
+                    Não, gravar de novo
+                  </Button>
+                  <Button
+                    onClick={handleConfirmYes}
+                    size="lg"
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    Sim, continuar
+                  </Button>
+                </div>
+              )}
+
+              {step === 'generating' && (
+                <div className="flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              )}
+
+              {step === 'suggesting' && suggestions.length > 0 && (
+                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                  {suggestions.map((suggestion, index) => (
+                    <Card key={index} className="border-2 border-primary/20 hover:border-primary/50 transition-all cursor-pointer">
+                      <CardContent className="p-4">
+                        <p className="text-sm mb-3">{suggestion}</p>
+                        <Button
+                          onClick={() => sendMessage(suggestion)}
+                          disabled={sending}
+                          size="sm"
+                          className="w-full"
+                        >
+                          {sending ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Enviando...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-4 h-4 mr-2" />
+                              Enviar esta mensagem
+                            </>
+                          )}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+
+                  <Button
+                    onClick={() => {
+                      setStep('recording');
+                      setSuggestions([]);
+                      setUserInstruction('');
+                      speak('Grave sua instrução novamente.');
+                      setTimeout(() => startListening(), 2000);
+                    }}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    <Mic className="w-4 h-4 mr-2" />
+                    Gravar nova instrução
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleCancelInstruction}
-            >
-              <X className="h-4 w-4 mr-2" />
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleConfirmInstruction}
-              disabled={!editableInstruction.trim()}
-            >
-              <Check className="h-4 w-4 mr-2" />
-              Gerar Sugestões
-            </Button>
-          </DialogFooter>
+          {/* Close button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-4 right-4"
+            onClick={closeVoiceModal}
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
