@@ -102,17 +102,8 @@ export function useVoiceConversation({
         recognitionRef.current.onend = () => {
           console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'Will restart:', currentTurn === 'user');
 
-          // If we're still in user turn, restart recognition
-          if (currentTurn === 'user') {
-            console.log('🔄 Restarting recognition automatically...');
-            try {
-              recognitionRef.current?.start();
-            } catch (err) {
-              console.error('❌ Error restarting recognition:', err);
-            }
-          } else {
-            setIsListening(false);
-          }
+          // Don't auto-restart anymore, let the app control it
+          setIsListening(false);
         };
 
         recognitionRef.current.onnomatch = () => {
@@ -232,36 +223,76 @@ export function useVoiceConversation({
   const startListening = useCallback(async () => {
     console.log('🎤 startListening called. isListening:', isListening, 'recognitionRef:', !!recognitionRef.current);
 
-    if (recognitionRef.current && !isListening) {
-      setError(null);
-      setTranscript('');
-      setCurrentTurn('user');
+    if (!recognitionRef.current) {
+      console.error('❌ No recognition ref available');
+      return;
+    }
 
-      try {
-        console.log('🎤 Initializing audio context...');
-        await initAudioContext();
+    if (isListening) {
+      console.warn('⚠️ Already listening, stopping first...');
+      recognitionRef.current.stop();
+      setIsListening(false);
+      // Wait for it to fully stop
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
 
-        console.log('🎤 Starting speech recognition...');
-        recognitionRef.current.start();
-        setIsListening(true);
+    setError(null);
+    setTranscript('');
+    setCurrentTurn('user');
 
-        console.log('🎤 Starting silence detection...');
-        startSilenceDetection();
+    try {
+      console.log('🎤 Initializing audio context...');
+      await initAudioContext();
 
-        console.log('✅ Started listening with silence detection');
-      } catch (err) {
-        console.error('❌ Error starting recognition:', err);
-        setError('Erro ao iniciar reconhecimento de voz: ' + (err as Error).message);
+      // Extra safety: ensure recognition is fully stopped
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      console.log('🎤 Starting speech recognition...');
+      recognitionRef.current.start();
+      setIsListening(true);
+
+      console.log('🎤 Starting silence detection...');
+      startSilenceDetection();
+
+      console.log('✅ Started listening with silence detection');
+    } catch (err: any) {
+      console.error('❌ Error starting recognition:', err);
+
+      // If it's an "already started" error, try stopping and restarting
+      if (err.message?.includes('already') || err.message?.includes('aborted')) {
+        console.log('🔄 Attempting to recover from "already started" error...');
+        try {
+          recognitionRef.current.stop();
+          await new Promise(resolve => setTimeout(resolve, 500));
+          recognitionRef.current.start();
+          setIsListening(true);
+          startSilenceDetection();
+          console.log('✅ Recovered and restarted recognition');
+        } catch (retryErr) {
+          console.error('❌ Failed to recover:', retryErr);
+          setError('Erro ao iniciar reconhecimento de voz. Tente novamente.');
+        }
+      } else {
+        setError('Erro ao iniciar reconhecimento de voz: ' + err.message);
       }
-    } else {
-      console.warn('⚠️ Cannot start listening. recognitionRef:', !!recognitionRef.current, 'isListening:', isListening);
     }
   }, [isListening, initAudioContext, startSilenceDetection]);
 
   const stopListening = useCallback(() => {
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
+    console.log('🛑 stopListening called. isListening:', isListening);
+
+    if (recognitionRef.current) {
+      try {
+        if (isListening) {
+          recognitionRef.current.stop();
+          console.log('✅ Recognition.stop() called');
+        }
+      } catch (err) {
+        console.error('⚠️ Error stopping recognition:', err);
+      }
+
       setIsListening(false);
+      setCurrentTurn('idle');
       stopSilenceDetection();
 
       // Clean up audio context

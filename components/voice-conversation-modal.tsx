@@ -142,15 +142,19 @@ export function VoiceConversationModal({
             setIsConfirmationOpen(true);
           } else {
             // Continue conversation - start listening again
-            console.log('🔄 Continuing conversation, listening again...');
-            setTimeout(() => startListening(), 500);
+            console.log('🔄 Continuing conversation, will start listening in 1 second...');
+            setTimeout(() => {
+              console.log('🔄 Now calling startListening...');
+              startListening();
+            }, 1000); // Increased delay to 1 second
           }
         });
       } else {
         // Error, retry
         speak("Desculpe, não entendi. Pode repetir?", () => {
           setIsProcessing(false);
-          startListening();
+          console.log('🔄 Error case, will start listening in 1 second...');
+          setTimeout(() => startListening(), 1000);
         });
       }
     } catch (error) {
