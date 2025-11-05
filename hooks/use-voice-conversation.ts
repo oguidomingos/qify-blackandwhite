@@ -149,23 +149,27 @@ export function useVoiceConversation({
         };
 
         recognitionRef.current.onend = () => {
-          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn);
+          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'isListening:', isListening);
 
-          // With continuous=false, we need to restart if still in user turn
-          if (currentTurn === 'user' && !isRestartingRef.current && isListening) {
+          // With continuous=false, we need to restart if user hasn't clicked stop yet
+          // Check isListening instead of currentTurn because it's more reliable
+          if (isListening && !isRestartingRef.current) {
             console.log('🔄 Auto-restarting recognition (continuous=false mode)');
             setTimeout(() => {
               try {
-                if (recognitionRef.current && currentTurn === 'user') {
+                if (recognitionRef.current && isListening) {
                   recognitionRef.current.start();
                 }
               } catch (err) {
                 console.error('❌ Error auto-restarting:', err);
                 setIsListening(false);
+                setCurrentTurn('idle');
               }
             }, 100);
           } else {
+            console.log('⏹️ Not restarting - user stopped or already restarting');
             setIsListening(false);
+            setCurrentTurn('idle');
           }
         };
 
@@ -258,18 +262,17 @@ export function useVoiceConversation({
     networkRetryCountRef.current = 0;
     isRestartingRef.current = false;
 
+    // First set isListening to false to prevent auto-restart
+    setIsListening(false);
+    setCurrentTurn('idle');
+
     if (recognitionRef.current) {
       try {
-        if (isListening) {
-          recognitionRef.current.stop();
-          console.log('✅ Recognition.stop() called');
-        }
+        recognitionRef.current.stop();
+        console.log('✅ Recognition.stop() called');
       } catch (err) {
         console.error('⚠️ Error stopping recognition:', err);
       }
-
-      setIsListening(false);
-      setCurrentTurn('idle');
 
       console.log('🛑 Stopped listening');
 
