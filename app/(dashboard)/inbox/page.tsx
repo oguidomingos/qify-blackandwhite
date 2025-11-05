@@ -152,16 +152,31 @@ export default function InboxPage() {
 
   // Transform chats data for display
   const pendingContacts = inboxData?.chats?.map(chat => {
+    // Extract clean name (remove group emoji prefix if exists)
+    let displayName = chat.contactName || "Contato sem nome";
+
+    // Remove the 👥 emoji prefix for display (it's already visual in the UI)
+    if (displayName.startsWith('👥 ')) {
+      displayName = displayName.substring(2).trim();
+    }
+
+    // If the name is still just a phone number, format it better
+    const phoneRegex = /^\+?\d+$/;
+    if (phoneRegex.test(displayName)) {
+      displayName = displayName.startsWith('+') ? displayName : `+${displayName}`;
+    }
+
     return {
       id: chat._id,
-      name: chat.contactName || "Contato sem nome",
+      name: displayName,
       platform: "whatsapp",
       messages: chat.unreadCount || 1,
       lastMessage: chat.lastMessage.text || "Sem mensagens",
       time: formatTimeAgo(chat.lastMessage.timestamp),
       contact: chat,
       unreadCount: chat.unreadCount,
-      isActive: chat.isActive
+      isActive: chat.isActive,
+      isGroup: chat.isGroup || false
     };
   }) || [];
 
@@ -327,18 +342,29 @@ export default function InboxPage() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Users className="w-6 h-6 text-primary" />
+                    <div className={`w-12 h-12 rounded-full ${contact.isGroup ? 'bg-green-500/10' : 'bg-primary/10'} flex items-center justify-center`}>
+                      {contact.isGroup ? (
+                        <Users className="w-6 h-6 text-green-500" />
+                      ) : (
+                        <MessageSquare className="w-6 h-6 text-primary" />
+                      )}
                     </div>
                     <div className="flex-1">
-                      <h3 className="font-semibold text-foreground">{contact.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-foreground">{contact.name}</h3>
+                        {contact.isGroup && (
+                          <Badge variant="outline" className="text-xs bg-green-500/10 border-green-500/30 text-green-600">
+                            Grupo
+                          </Badge>
+                        )}
+                      </div>
                       <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                        <div className="w-2 h-2 rounded-full bg-primary/20"></div>
+                        <div className={`w-2 h-2 rounded-full ${contact.isActive ? 'bg-green-500' : 'bg-primary/20'}`}></div>
                         <span>{contact.platform}</span>
                         <span>•</span>
                         <span>{contact.messages} mensagens</span>
                         {contact.unreadCount > 0 && (
-                          <Badge variant="secondary" className="text-xs">
+                          <Badge variant="secondary" className="text-xs bg-blue-500/20 text-blue-600">
                             {contact.unreadCount} não lidas
                           </Badge>
                         )}

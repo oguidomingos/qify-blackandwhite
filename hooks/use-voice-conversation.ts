@@ -28,6 +28,7 @@ export function useVoiceConversation({
   const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   const networkRetryCountRef = useRef<number>(0);
   const isRestartingRef = useRef<boolean>(false);
+  const shouldBeListeningRef = useRef<boolean>(false); // Track intended listening state
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -37,8 +38,8 @@ export function useVoiceConversation({
       if (SpeechRecognition) {
         recognitionRef.current = new SpeechRecognition();
 
-        // Try with continuous=false to reduce network issues
-        recognitionRef.current.continuous = false; // Changed from true to false
+        // Use continuous=true for better stability (prevents frequent reconnections)
+        recognitionRef.current.continuous = true;
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'pt-BR';
         recognitionRef.current.maxAlternatives = 1;
@@ -85,17 +86,24 @@ export function useVoiceConversation({
           if (event.error === 'network') {
             console.log('🌐 Network error detected. Attempting to reconnect...');
 
-            // Don't show scary error message to user - try more times
-            if (networkRetryCountRef.current < 5) { // Increased from 3 to 5
-              networkRetryCountRef.current += 1;
-              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/5`);
+            // Check if we should still be listening
+            if (!shouldBeListeningRef.current) {
+              console.log('⚠️ User stopped listening, not retrying');
+              return;
+            }
 
-              // Try to restart recognition after a longer delay
-              const retryDelay = 1500 + (networkRetryCountRef.current * 500); // Progressive backoff: 2s, 2.5s, 3s, 3.5s, 4s
+            // More retries with exponential backoff
+            if (networkRetryCountRef.current < 8) {
+              networkRetryCountRef.current += 1;
+              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/8`);
+
+              // Exponential backoff: 1s, 2s, 4s, 8s, etc (capped at 10s)
+              const retryDelay = Math.min(1000 * Math.pow(2, networkRetryCountRef.current - 1), 10000);
               console.log(`⏱️ Waiting ${retryDelay}ms before retry...`);
 
               setTimeout(() => {
-                if (currentTurn === 'user' && !isRestartingRef.current) {
+                // Double-check user intent
+                if (shouldBeListeningRef.current && !isRestartingRef.current) {
                   console.log('🔄 Restarting recognition after network error...');
                   isRestartingRef.current = true;
 
@@ -110,8 +118,10 @@ export function useVoiceConversation({
 
                   setTimeout(() => {
                     try {
-                      if (recognitionRef.current && currentTurn === 'user') {
+                      if (recognitionRef.current && shouldBeListeningRef.current) {
                         recognitionRef.current.start();
+                        setIsListening(true); // Ensure state is synced
+                        setCurrentTurn('user');
                         console.log('✅ Recognition restarted after network error');
                       }
                     } catch (err) {
@@ -119,18 +129,20 @@ export function useVoiceConversation({
                       setError('Erro de conexão. Clique no microfone para reiniciar.');
                       setIsListening(false);
                       setCurrentTurn('idle');
+                      shouldBeListeningRef.current = false;
                     } finally {
                       isRestartingRef.current = false;
                     }
-                  }, 800); // Increased delay before restart
+                  }, 500);
                 }
               }, retryDelay);
             } else {
-              console.error('❌ Max retries reached (5 attempts)');
+              console.error('❌ Max retries reached (8 attempts)');
               setError('Erro de conexão persistente. Clique no microfone para reiniciar.');
               setIsListening(false);
               setCurrentTurn('idle');
-              networkRetryCountRef.current = 0; // Reset for next time
+              shouldBeListeningRef.current = false;
+              networkRetryCountRef.current = 0;
             }
             return;
           }
@@ -149,27 +161,31 @@ export function useVoiceConversation({
         };
 
         recognitionRef.current.onend = () => {
-          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'isListening:', isListening);
+          console.log('🎤 Recognition ended. shouldBeListening:', shouldBeListeningRef.current, 'isRestartingRef:', isRestartingRef.current);
 
-          // With continuous=false, we need to restart if user hasn't clicked stop yet
-          // Check isListening instead of currentTurn because it's more reliable
-          if (isListening && !isRestartingRef.current) {
-            console.log('🔄 Auto-restarting recognition (continuous=false mode)');
+          // Only restart if user still wants to listen (using ref to avoid state timing issues)
+          if (shouldBeListeningRef.current && !isRestartingRef.current) {
+            console.log('🔄 Auto-restarting recognition (user still listening)');
             setTimeout(() => {
               try {
-                if (recognitionRef.current && isListening) {
+                if (recognitionRef.current && shouldBeListeningRef.current) {
+                  console.log('✅ Restarting recognition...');
                   recognitionRef.current.start();
+                  setIsListening(true); // Sync state
+                  setCurrentTurn('user');
                 }
               } catch (err) {
                 console.error('❌ Error auto-restarting:', err);
                 setIsListening(false);
                 setCurrentTurn('idle');
+                shouldBeListeningRef.current = false;
               }
-            }, 100);
+            }, 200);
           } else {
-            console.log('⏹️ Not restarting - user stopped or already restarting');
+            console.log('⏹️ Not restarting - user stopped listening');
             setIsListening(false);
             setCurrentTurn('idle');
+            shouldBeListeningRef.current = false;
           }
         };
 
@@ -202,7 +218,7 @@ export function useVoiceConversation({
         recognitionRef.current.stop();
       }
     };
-  }, [currentTurn]);
+  }, []); // Remove currentTurn dependency to prevent unnecessary reinitializations
 
   const startListening = useCallback(async () => {
     console.log('🎤 startListening called. isListening:', isListening, 'recognitionRef:', !!recognitionRef.current);
@@ -227,6 +243,7 @@ export function useVoiceConversation({
     setError(null);
     setTranscript('');
     setCurrentTurn('user');
+    shouldBeListeningRef.current = true; // Set intent to listen
 
     try {
       console.log('🎤 Starting speech recognition...');
@@ -261,6 +278,7 @@ export function useVoiceConversation({
     // Reset retry counters
     networkRetryCountRef.current = 0;
     isRestartingRef.current = false;
+    shouldBeListeningRef.current = false; // Clear intent to listen
 
     // First set isListening to false to prevent auto-restart
     setIsListening(false);
