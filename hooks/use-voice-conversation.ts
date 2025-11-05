@@ -29,6 +29,7 @@ export function useVoiceConversation({
   const networkRetryCountRef = useRef<number>(0);
   const isRestartingRef = useRef<boolean>(false);
   const shouldBeListeningRef = useRef<boolean>(false); // Track intended listening state
+  const accumulatedTranscriptRef = useRef<string>(''); // Accumulate final transcripts across restarts
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -52,26 +53,37 @@ export function useVoiceConversation({
 
         recognitionRef.current.onresult = (event: any) => {
           let interimTranscript = '';
-          let finalTranscript = '';
+          let newFinalTranscript = '';
 
+          // Process results from the current recognition session
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcriptPiece = event.results[i][0].transcript;
 
             if (event.results[i].isFinal) {
-              finalTranscript += transcriptPiece;
+              newFinalTranscript += transcriptPiece + ' ';
+              console.log('✅ Final piece received:', transcriptPiece);
             } else {
               interimTranscript += transcriptPiece;
             }
           }
 
-          const currentTranscript = finalTranscript || interimTranscript;
-          setTranscript(currentTranscript);
-
-          // When we have final transcript, just update it
-          if (finalTranscript) {
-            console.log('✅ Final transcript:', finalTranscript.substring(0, 50));
-            setTranscript(finalTranscript);
+          // Accumulate new final transcripts into our ref
+          if (newFinalTranscript) {
+            accumulatedTranscriptRef.current += newFinalTranscript;
+            console.log('📚 Accumulated so far:', accumulatedTranscriptRef.current.substring(0, 100));
           }
+
+          // Combine accumulated final + current interim
+          const fullTranscript = (accumulatedTranscriptRef.current + interimTranscript).trim();
+
+          console.log('📝 Transcript update:', {
+            accumulated: accumulatedTranscriptRef.current.substring(0, 30),
+            interim: interimTranscript.substring(0, 30),
+            displaying: fullTranscript.substring(0, 50),
+            totalLength: fullTranscript.length
+          });
+
+          setTranscript(fullTranscript);
         };
 
         recognitionRef.current.onerror = (event: any) => {
@@ -242,6 +254,7 @@ export function useVoiceConversation({
 
     setError(null);
     setTranscript('');
+    accumulatedTranscriptRef.current = ''; // Clear accumulated transcript for new session
     setCurrentTurn('user');
     shouldBeListeningRef.current = true; // Set intent to listen
 
