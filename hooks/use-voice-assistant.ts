@@ -24,13 +24,32 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
       if (SpeechRecognition) {
         recognitionRef.current = new SpeechRecognition();
         recognitionRef.current.continuous = false;
-        recognitionRef.current.interimResults = false;
+        recognitionRef.current.interimResults = true; // Enable interim results for real-time feedback
         recognitionRef.current.lang = 'pt-BR';
 
         recognitionRef.current.onresult = (event: any) => {
-          const text = event.results[0][0].transcript;
-          setTranscript(text);
-          onTranscript?.(text);
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcriptPiece = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcriptPiece;
+            } else {
+              interimTranscript += transcriptPiece;
+            }
+          }
+
+          // Update transcript in real-time (interim or final)
+          const currentTranscript = finalTranscript || interimTranscript;
+          console.log('📝 Real-time transcript:', currentTranscript);
+          setTranscript(currentTranscript);
+
+          // Only trigger callback when final
+          if (finalTranscript) {
+            console.log('✅ Final transcript:', finalTranscript);
+            onTranscript?.(finalTranscript);
+          }
         };
 
         recognitionRef.current.onerror = (event: any) => {
@@ -40,6 +59,7 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
         };
 
         recognitionRef.current.onend = () => {
+          console.log('🎤 Recognition ended');
           setIsListening(false);
         };
       } else {

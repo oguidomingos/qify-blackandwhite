@@ -3,8 +3,17 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Mic, Send, X, Loader2 } from "lucide-react";
+import { Mic, Send, X, Loader2, Edit2, Check } from "lucide-react";
 import { useVoiceAssistant } from "@/hooks/use-voice-assistant";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 interface VoiceAssistantPanelProps {
   conversation: any | null;
@@ -23,6 +32,8 @@ export function VoiceAssistantPanel({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [userInstruction, setUserInstruction] = useState('');
   const [sending, setSending] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [editableInstruction, setEditableInstruction] = useState('');
 
   const { isListening, isSpeaking, transcript, speak, startListening, stopListening, stopSpeaking } = useVoiceAssistant({
     onTranscript: handleTranscript,
@@ -51,11 +62,27 @@ export function VoiceAssistantPanel({
     }
 
     setUserInstruction(text);
-    setStage('processing');
+    setEditableInstruction(text);
     stopListening();
+    setStage('idle'); // Back to idle while user confirms
+
+    // Show confirmation dialog
+    setShowConfirmDialog(true);
+  }
+
+  function handleConfirmInstruction() {
+    setShowConfirmDialog(false);
+    setStage('processing');
 
     // Get AI suggestions based on user instruction
-    generateSuggestions(text);
+    generateSuggestions(editableInstruction);
+  }
+
+  function handleCancelInstruction() {
+    setShowConfirmDialog(false);
+    setUserInstruction('');
+    setEditableInstruction('');
+    setStage('idle');
   }
 
   async function analyzeConversation() {
@@ -243,17 +270,46 @@ export function VoiceAssistantPanel({
 
       {/* Voice Input - Show after analysis or when idle */}
       {stage === 'idle' && !suggestions.length && (
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={handleMicClick}
-            size="lg"
-            className={`flex-1 ${isListening ? 'bg-red-500 hover:bg-red-600' : ''}`}
-            disabled={isSpeaking}
-          >
-            <Mic className="w-5 h-5 mr-2" />
-            {isListening ? 'Pare de falar para processar' : 'Ou fale uma instrução diretamente'}
-          </Button>
-        </div>
+        <>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleMicClick}
+              size="lg"
+              className={`flex-1 ${isListening ? 'bg-red-500 hover:bg-red-600 animate-pulse' : ''}`}
+              disabled={isSpeaking}
+            >
+              <Mic className="w-5 h-5 mr-2" />
+              {isListening ? 'Clique para parar' : 'Falar Instrução'}
+            </Button>
+          </div>
+
+          {/* Real-time Transcription Display */}
+          {isListening && (
+            <Card className="glass border-red-500/50 bg-red-500/5">
+              <CardContent className="p-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1">
+                      <div className="w-1 h-8 bg-red-500 animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-1 h-6 bg-red-500 animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-1 h-10 bg-red-500 animate-pulse" style={{ animationDelay: '300ms' }}></div>
+                      <div className="w-1 h-5 bg-red-500 animate-pulse" style={{ animationDelay: '450ms' }}></div>
+                      <div className="w-1 h-9 bg-red-500 animate-pulse" style={{ animationDelay: '600ms' }}></div>
+                    </div>
+                    <span className="text-sm font-semibold text-red-500">Gravando...</span>
+                  </div>
+                  <div className="min-h-[60px] p-3 bg-background/50 rounded-md">
+                    {transcript ? (
+                      <p className="text-sm text-foreground">{transcript}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">Fale agora...</p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Status Messages */}
@@ -349,6 +405,50 @@ export function VoiceAssistantPanel({
           </Button>
         </div>
       )}
+
+      {/* Confirmation/Edit Dialog */}
+      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Confirmar Instrução</DialogTitle>
+            <DialogDescription>
+              Revise ou edite sua instrução antes de gerar as sugestões de resposta.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Sua instrução:</label>
+              <Textarea
+                value={editableInstruction}
+                onChange={(e) => setEditableInstruction(e.target.value)}
+                placeholder="Digite sua instrução aqui..."
+                className="min-h-[100px] resize-none"
+              />
+              <p className="text-xs text-muted-foreground">
+                Exemplo: "Pergunte quando ele quer receber o orçamento"
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleCancelInstruction}
+            >
+              <X className="h-4 w-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmInstruction}
+              disabled={!editableInstruction.trim()}
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Gerar Sugestões
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
