@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MessageSquare, Mic, Users, Clock, Loader2 } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
-import { VoiceConversationModal } from "@/components/voice-conversation-modal";
+import { VoiceChatAssistant } from "@/components/voice-chat-assistant";
 
 interface Contact {
   _id: string;
@@ -443,7 +443,7 @@ export default function InboxPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <VoiceConversationModal
+                    <VoiceChatAssistant
                       conversation={conversation}
                       contactName={selectedContact || ''}
                       contactId={selectedContactId}
