@@ -37,6 +37,8 @@ export function useVoiceConversation({
   const volumeCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastSpeechTimeRef = useRef<number>(Date.now());
   const streamRef = useRef<MediaStream | null>(null);
+  const networkRetryCountRef = useRef<number>(0);
+  const isRestartingRef = useRef<boolean>(false);
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -90,9 +92,66 @@ export function useVoiceConversation({
 
         recognitionRef.current.onerror = (event: any) => {
           console.error('❌ Speech recognition error:', event.error, 'Message:', event.message);
-          if (event.error !== 'no-speech') {
-            setError(`Erro no reconhecimento: ${event.error}`);
+
+          // Handle different error types
+          if (event.error === 'no-speech') {
+            console.log('⚠️ No speech detected (this is normal)');
+            return; // Don't show error for no-speech
           }
+
+          if (event.error === 'network') {
+            console.log('🌐 Network error detected. Attempting to reconnect...');
+
+            // Don't show scary error message to user
+            if (networkRetryCountRef.current < 3) {
+              networkRetryCountRef.current += 1;
+              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/3`);
+
+              // Try to restart recognition after a short delay
+              setTimeout(() => {
+                if (currentTurn === 'user' && !isRestartingRef.current) {
+                  console.log('🔄 Restarting recognition after network error...');
+                  isRestartingRef.current = true;
+
+                  // Stop and restart
+                  try {
+                    if (recognitionRef.current) {
+                      recognitionRef.current.stop();
+                    }
+                  } catch (e) {
+                    console.log('Stop error (expected):', e);
+                  }
+
+                  setTimeout(() => {
+                    try {
+                      if (recognitionRef.current && currentTurn === 'user') {
+                        recognitionRef.current.start();
+                        console.log('✅ Recognition restarted after network error');
+                      }
+                    } catch (err) {
+                      console.error('Failed to restart:', err);
+                      setError('Erro de conexão. Clique no microfone para tentar novamente.');
+                    } finally {
+                      isRestartingRef.current = false;
+                    }
+                  }, 500);
+                }
+              }, 1000);
+            } else {
+              console.error('❌ Max retries reached');
+              setError('Erro de conexão. Clique no microfone para tentar novamente.');
+              networkRetryCountRef.current = 0; // Reset for next time
+            }
+            return;
+          }
+
+          if (event.error === 'aborted') {
+            console.log('⚠️ Recognition aborted (normal during restart)');
+            return; // Don't show error for aborted
+          }
+
+          // For other errors, show message
+          setError(`Erro no reconhecimento: ${event.error}`);
         };
 
         recognitionRef.current.onstart = () => {
@@ -236,6 +295,10 @@ export function useVoiceConversation({
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
+    // Reset network retry counter when user manually starts
+    networkRetryCountRef.current = 0;
+    isRestartingRef.current = false;
+
     setError(null);
     setTranscript('');
     setCurrentTurn('user');
@@ -280,6 +343,10 @@ export function useVoiceConversation({
 
   const stopListening = useCallback(() => {
     console.log('🛑 stopListening called. isListening:', isListening);
+
+    // Reset retry counters
+    networkRetryCountRef.current = 0;
+    isRestartingRef.current = false;
 
     if (recognitionRef.current) {
       try {
