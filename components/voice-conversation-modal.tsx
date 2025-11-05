@@ -54,7 +54,7 @@ export function VoiceConversationModal({
     resetConversation
   } = useVoiceConversation({
     onSilenceDetected: handleSilenceDetected,
-    silenceThreshold: 2000, // 2 seconds
+    silenceThreshold: 10000, // 10 seconds - long timeout, user will click to stop
     volumeThreshold: 30
   });
 
@@ -87,8 +87,18 @@ export function VoiceConversationModal({
     resetConversation();
   }
 
+  function handleStopListening() {
+    console.log('🛑 User clicked to stop listening');
+    if (!transcript || transcript.trim().length === 0) {
+      console.log('❌ No transcript yet, not processing');
+      return;
+    }
+
+    handleSilenceDetected();
+  }
+
   async function handleSilenceDetected() {
-    console.log('🤫 Silence detected, processing user message...');
+    console.log('🤫 Processing user message...');
     setIsProcessing(true);
     stopListening();
 
@@ -286,8 +296,12 @@ export function VoiceConversationModal({
             {/* Voice Visualization */}
             <div className="border-t bg-background/50 p-6">
               <div className="flex items-center justify-center gap-6">
-                {/* Visual indicator */}
-                <div className="relative">
+                {/* Visual indicator - CLICKABLE */}
+                <button
+                  onClick={handleStopListening}
+                  disabled={!isListening || isProcessing || isSpeaking}
+                  className="relative group disabled:cursor-not-allowed cursor-pointer"
+                >
                   {(isListening || isSpeaking) && (
                     <>
                       <div className="absolute inset-0 rounded-full bg-blue-500/10 animate-ping" style={{ animationDuration: '2s' }}></div>
@@ -297,14 +311,14 @@ export function VoiceConversationModal({
 
                   <div className={`relative w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 ${
                     isListening
-                      ? 'bg-blue-500/20 border-4 border-blue-500'
+                      ? 'bg-blue-500/20 border-4 border-blue-500 group-hover:border-red-500 group-hover:bg-red-500/20'
                       : isSpeaking
                       ? 'bg-green-500/20 border-4 border-green-500'
                       : 'bg-muted border-4 border-muted-foreground/20'
                   }`}>
-                    <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
                       isListening
-                        ? 'bg-blue-500 animate-pulse'
+                        ? 'bg-blue-500 animate-pulse group-hover:bg-red-500'
                         : isSpeaking
                         ? 'bg-green-500 animate-pulse'
                         : 'bg-muted-foreground/20'
@@ -318,7 +332,7 @@ export function VoiceConversationModal({
                       )}
                     </div>
                   </div>
-                </div>
+                </button>
 
                 {/* Status text */}
                 <div className="text-center">
@@ -329,11 +343,16 @@ export function VoiceConversationModal({
                     {isProcessing && 'Processando...'}
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {isListening && 'Fale naturalmente, detectarei quando você parar'}
+                    {isListening && '👆 Clique no microfone quando terminar de falar'}
                     {isSpeaking && 'Aguarde a IA terminar de falar'}
-                    {!isListening && !isSpeaking && !isProcessing && 'Clique para fechar'}
+                    {!isListening && !isSpeaking && !isProcessing && 'Clique no X para fechar'}
                     {isProcessing && 'Analisando sua mensagem...'}
                   </p>
+                  {isListening && transcript && (
+                    <p className="text-xs text-blue-600 mt-2 font-medium animate-pulse">
+                      ✅ Captando áudio - Clique para enviar
+                    </p>
+                  )}
                 </div>
               </div>
 
