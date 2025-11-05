@@ -259,16 +259,19 @@ export async function GET(request: Request) {
       const phoneNumbers = realChats
         .filter(chat => !chat.remoteJid.endsWith('@g.us'))
         .map(chat => chat.remoteJid)
-        .slice(0, 30); // Limit to first 30 to avoid timeout
+        .slice(0, 10); // Reduced from 30 to 10 to speed up
 
-      console.log(`📱 Fetching WhatsApp profiles for ${phoneNumbers.length} contacts...`);
+      console.log(`📱 Fetching WhatsApp profiles for ${phoneNumbers.length} contacts (limit: 10 for speed)...`);
 
-      // Fetch profile info for each contact in parallel (batches of 10)
-      const batchSize = 10;
+      // Fetch profile info for each contact in parallel (smaller batches + timeout per batch)
+      const batchSize = 5; // Reduced from 10 to 5
+      const profileTimeout = 3000; // 3 seconds max per batch
+
       for (let i = 0; i < phoneNumbers.length; i += batchSize) {
         const batch = phoneNumbers.slice(i, i + batchSize);
 
-        const results = await Promise.allSettled(
+        // Add timeout per batch
+        const batchPromise = Promise.allSettled(
           batch.map(async (remoteJid) => {
             // Try multiple profile endpoints
             const profileEndpoints = [
@@ -280,7 +283,9 @@ export async function GET(request: Request) {
             for (const endpoint of profileEndpoints) {
               try {
                 const number = remoteJid.split('@')[0];
-                const profileResponse = await fetch(
+
+                // Add timeout per request
+                const fetchPromise = fetch(
                   `${EVOLUTION_BASE_URL}${endpoint}`,
                   {
                     method: 'POST',
@@ -288,9 +293,12 @@ export async function GET(request: Request) {
                       'Content-Type': 'application/json',
                       'apikey': EVOLUTION_API_KEY!
                     },
-                    body: JSON.stringify({ number: number })
+                    body: JSON.stringify({ number: number }),
+                    signal: AbortSignal.timeout(2000) // 2 second timeout per request
                   }
                 );
+
+                const profileResponse = await fetchPromise;
 
                 if (profileResponse.ok) {
                   const profileData = await profileResponse.json();
@@ -310,46 +318,63 @@ export async function GET(request: Request) {
                   }
                 }
               } catch (err) {
-                // Try next endpoint
+                // Silently continue to next endpoint
               }
             }
           })
         );
+
+        // Add timeout for the entire batch
+        const batchTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Batch timeout')), profileTimeout)
+        );
+
+        try {
+          await Promise.race([batchPromise, batchTimeout]);
+        } catch (err) {
+          console.log(`⏱️ Batch ${i / batchSize + 1} timed out, continuing...`);
+        }
       }
 
       console.log(`✅ Loaded ${profileNamesMap.size} profile names from WhatsApp`);
 
-      // Also try the contacts endpoint as fallback
+      // Also try the contacts endpoint as fallback (with timeout)
       try {
-        const contactsResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findContacts/${INSTANCE_NAME}`, {
+        console.log('📇 Fetching contacts list...');
+
+        const contactsPromise = fetch(`${EVOLUTION_BASE_URL}/chat/findContacts/${INSTANCE_NAME}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'apikey': EVOLUTION_API_KEY!
           },
-          body: JSON.stringify({})
+          body: JSON.stringify({}),
+          signal: AbortSignal.timeout(5000) // 5 second timeout
         });
+
+        const contactsResponse = await contactsPromise;
 
         if (contactsResponse.ok) {
           const contactsData = await contactsResponse.json();
           const contacts = Array.isArray(contactsData) ? contactsData : contactsData?.data || [];
 
-          console.log(`📦 Processing ${contacts.length} contacts from API...`);
+          console.log(`📦 Processing ${contacts.length} contacts from API (max 20)...`);
 
-          contacts.forEach((contact: any) => {
+          // Limit to first 20 contacts to avoid slowdown
+          contacts.slice(0, 20).forEach((contact: any) => {
             const jid = contact.id || contact.remoteJid || contact.jid;
             const name = contact.pushName || contact.name || contact.verifiedName || contact.notify;
 
             if (jid && name && name !== jid.split('@')[0] && !profileNamesMap.has(jid)) {
               profileNamesMap.set(jid, name);
-              console.log(`  ✓ Contact API: ${jid.split('@')[0]} -> ${name}`);
+              console.log(`  ✓ Contact API: ${jid.split('@')[0].substring(0, 15)} -> ${name}`);
             }
           });
 
           console.log(`✅ Total names collected: ${profileNamesMap.size}`);
         }
       } catch (err) {
-        console.log('⚠️ Contacts API failed, using profile names only');
+        console.log('⚠️ Contacts API failed or timed out, using profile names only');
       }
 
       // Enrich chats with profile names
@@ -369,28 +394,48 @@ export async function GET(request: Request) {
       const timeFilter = getTimeFilter(period);
       let filteredChats = realChats;
 
+      console.log(`📅 Applying filters - Period: ${period}, ActiveOnly: ${activeOnly}, ChatType: ${chatType}`);
+      console.log(`📊 Initial chats count: ${realChats.length}`);
+
       if (timeFilter > 0) {
+        const beforeCount = filteredChats.length;
         filteredChats = realChats.filter(chat => {
           const updatedTime = new Date(chat.updatedAt).getTime();
           return updatedTime >= timeFilter;
         });
+        console.log(`  ⏰ Time filter (${period}): ${beforeCount} -> ${filteredChats.length} chats`);
       }
 
       // Apply chat type filter
       if (chatType === 'individual') {
+        const beforeCount = filteredChats.length;
         filteredChats = filteredChats.filter(chat => !chat.remoteJid.endsWith('@g.us'));
+        console.log(`  👤 Individual filter: ${beforeCount} -> ${filteredChats.length} chats`);
       } else if (chatType === 'group') {
+        const beforeCount = filteredChats.length;
         filteredChats = filteredChats.filter(chat => chat.remoteJid.endsWith('@g.us'));
+        console.log(`  👥 Group filter: ${beforeCount} -> ${filteredChats.length} chats`);
       }
 
-      // Apply active filter
+      // Apply active filter - RELAXED to show more conversations
       if (activeOnly) {
+        const beforeCount = filteredChats.length;
         filteredChats = filteredChats.filter(chat => {
           const updatedTime = new Date(chat.updatedAt).getTime();
-          const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
-          return updatedTime >= dayAgo || chat.windowActive;
+          const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); // Changed from 24h to 7 days
+          const isRecent = updatedTime >= sevenDaysAgo;
+          const isWindowActive = chat.windowActive;
+
+          if (!isRecent && !isWindowActive) {
+            console.log(`  ❌ Filtered out ${chat.remoteJid.split('@')[0]}: too old (${Math.round((Date.now() - updatedTime) / (24 * 60 * 60 * 1000))} days)`);
+          }
+
+          return isRecent || isWindowActive;
         });
+        console.log(`  ✅ Active filter (7 days): ${beforeCount} -> ${filteredChats.length} chats`);
       }
+
+      console.log(`📊 Final chats count after all filters: ${filteredChats.length}`);
 
       // Transform to our format
       const transformedChats = filteredChats
