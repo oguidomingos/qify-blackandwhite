@@ -255,9 +255,19 @@ export async function GET(request: Request) {
       console.log('📞 Fetching WhatsApp profile names for contacts...');
       const profileNamesMap = new Map();
 
-      // Get unique phone numbers from chats (excluding groups)
+      // First, populate with names already in pushName (from messages)
+      realChats.forEach(chat => {
+        if (chat.pushName && chat.pushName !== chat.remoteJid.split('@')[0]) {
+          profileNamesMap.set(chat.remoteJid, chat.pushName);
+          console.log(`  ✓ Using existing pushName: ${chat.remoteJid.split('@')[0].substring(0, 15)} -> "${chat.pushName}"`);
+        }
+      });
+
+      console.log(`📚 Starting with ${profileNamesMap.size} names from messages`);
+
+      // Get unique phone numbers from chats (excluding groups and those with names)
       const phoneNumbers = realChats
-        .filter(chat => !chat.remoteJid.endsWith('@g.us'))
+        .filter(chat => !chat.remoteJid.endsWith('@g.us') && !profileNamesMap.has(chat.remoteJid))
         .map(chat => chat.remoteJid)
         .slice(0, 10); // Reduced from 30 to 10 to speed up
 

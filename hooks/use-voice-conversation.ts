@@ -104,22 +104,55 @@ export function useVoiceConversation({
               return;
             }
 
-            // More retries with exponential backoff
-            if (networkRetryCountRef.current < 8) {
+            // If this is the first error, it might be a Chrome/permission issue - just retry once quickly
+            if (networkRetryCountRef.current === 0) {
               networkRetryCountRef.current += 1;
-              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/8`);
+              console.log('🔄 First network error - quick retry (might be Chrome initialization)');
 
-              // Exponential backoff: 1s, 2s, 4s, 8s, etc (capped at 10s)
-              const retryDelay = Math.min(1000 * Math.pow(2, networkRetryCountRef.current - 1), 10000);
+              setTimeout(() => {
+                if (shouldBeListeningRef.current && !isRestartingRef.current) {
+                  isRestartingRef.current = true;
+                  try {
+                    if (recognitionRef.current) {
+                      recognitionRef.current.stop();
+                    }
+                  } catch (e) {
+                    // Ignore
+                  }
+
+                  setTimeout(() => {
+                    try {
+                      if (recognitionRef.current && shouldBeListeningRef.current) {
+                        recognitionRef.current.start();
+                        setIsListening(true);
+                        setCurrentTurn('user');
+                        console.log('✅ Quick retry successful');
+                      }
+                    } catch (err) {
+                      console.error('Quick retry failed:', err);
+                    } finally {
+                      isRestartingRef.current = false;
+                    }
+                  }, 300);
+                }
+              }, 500);
+              return;
+            }
+
+            // More retries with exponential backoff (after first quick retry)
+            if (networkRetryCountRef.current < 6) {
+              networkRetryCountRef.current += 1;
+              console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/6`);
+
+              // Exponential backoff: 1s, 2s, 4s, 8s
+              const retryDelay = Math.min(1000 * Math.pow(2, networkRetryCountRef.current - 2), 8000);
               console.log(`⏱️ Waiting ${retryDelay}ms before retry...`);
 
               setTimeout(() => {
-                // Double-check user intent
                 if (shouldBeListeningRef.current && !isRestartingRef.current) {
                   console.log('🔄 Restarting recognition after network error...');
                   isRestartingRef.current = true;
 
-                  // Stop and restart
                   try {
                     if (recognitionRef.current) {
                       recognitionRef.current.stop();
@@ -132,7 +165,7 @@ export function useVoiceConversation({
                     try {
                       if (recognitionRef.current && shouldBeListeningRef.current) {
                         recognitionRef.current.start();
-                        setIsListening(true); // Ensure state is synced
+                        setIsListening(true);
                         setCurrentTurn('user');
                         console.log('✅ Recognition restarted after network error');
                       }
@@ -149,8 +182,8 @@ export function useVoiceConversation({
                 }
               }, retryDelay);
             } else {
-              console.error('❌ Max retries reached (8 attempts)');
-              setError('Erro de conexão persistente. Clique no microfone para reiniciar.');
+              console.error('❌ Max retries reached (6 attempts)');
+              setError('Serviço de reconhecimento indisponível. Tente novamente em alguns segundos.');
               setIsListening(false);
               setCurrentTurn('idle');
               shouldBeListeningRef.current = false;
