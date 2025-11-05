@@ -255,23 +255,73 @@ export async function GET(request: Request) {
       console.log('📞 Fetching WhatsApp profile names for contacts...');
       const profileNamesMap = new Map();
 
-      // First, populate with names already in pushName (from messages)
+      // First, populate with names already in pushName (from chats)
       realChats.forEach(chat => {
         if (chat.pushName && chat.pushName !== chat.remoteJid.split('@')[0]) {
           profileNamesMap.set(chat.remoteJid, chat.pushName);
-          console.log(`  ✓ Using existing pushName: ${chat.remoteJid.split('@')[0].substring(0, 15)} -> "${chat.pushName}"`);
+          console.log(`  ✓ Using existing pushName from chat: ${chat.remoteJid.split('@')[0].substring(0, 15)} -> "${chat.pushName}"`);
         }
       });
 
-      console.log(`📚 Starting with ${profileNamesMap.size} names from messages`);
+      console.log(`📚 Starting with ${profileNamesMap.size} names from chats`);
+
+      // ALWAYS fetch recent messages to get pushName (this is the most reliable source)
+      try {
+        console.log('📨 Fetching recent messages for contact names...');
+
+        const messagesResponse = await fetch(`${EVOLUTION_BASE_URL}/chat/findMessages/${INSTANCE_NAME}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_API_KEY!
+          },
+          body: JSON.stringify({ limit: 100 }), // Last 100 messages
+          signal: AbortSignal.timeout(8000)
+        });
+
+        if (messagesResponse.ok) {
+          const messagesData = await messagesResponse.json();
+          let messages: any[] = [];
+
+          if (Array.isArray(messagesData)) {
+            messages = messagesData;
+          } else if (messagesData?.messages?.records) {
+            messages = messagesData.messages.records;
+          } else if (messagesData?.data) {
+            messages = messagesData.data;
+          }
+
+          console.log(`📬 Processing ${messages.length} messages for names...`);
+
+          // Extract names from messages
+          messages.forEach((msg: any) => {
+            const remoteJid = msg.key?.remoteJid || msg.remoteJid;
+            if (!remoteJid) return;
+
+            // Extract name from message - try multiple fields
+            const messageName = msg.pushName || msg.notifyName || msg.verifiedName || msg.name;
+
+            if (messageName && messageName !== remoteJid.split('@')[0] && !profileNamesMap.has(remoteJid)) {
+              profileNamesMap.set(remoteJid, messageName);
+              console.log(`  ✓ Name from message: ${remoteJid.split('@')[0].substring(0, 15)} -> "${messageName}"`);
+            }
+          });
+
+          console.log(`📚 After messages: ${profileNamesMap.size} total names`);
+        } else {
+          console.log('⚠️ Messages endpoint failed, continuing without message names');
+        }
+      } catch (err) {
+        console.log('⚠️ Error fetching messages for names:', err);
+      }
 
       // Get unique phone numbers from chats (excluding groups and those with names)
       const phoneNumbers = realChats
         .filter(chat => !chat.remoteJid.endsWith('@g.us') && !profileNamesMap.has(chat.remoteJid))
         .map(chat => chat.remoteJid)
-        .slice(0, 10); // Reduced from 30 to 10 to speed up
+        .slice(0, 5); // Reduced to 5 since we already have most names from messages
 
-      console.log(`📱 Fetching WhatsApp profiles for ${phoneNumbers.length} contacts (limit: 10 for speed)...`);
+      console.log(`📱 Fetching WhatsApp profiles for remaining ${phoneNumbers.length} contacts...`);
 
       // Fetch profile info for each contact in parallel (smaller batches + timeout per batch)
       const batchSize = 5; // Reduced from 10 to 5

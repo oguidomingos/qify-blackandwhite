@@ -248,10 +248,14 @@ export function useVoiceConversation({
 
         recognitionRef.current.onspeechstart = () => {
           console.log('🗣️ Speech started!');
+          // Reset error when speech is detected
+          setError(null);
         };
 
         recognitionRef.current.onspeechend = () => {
-          console.log('🗣️ Speech ended');
+          console.log('🗣️ Speech ended - user stopped talking (this is normal, will continue listening)');
+          // DON'T stop here - with continuous=true, recognition will keep listening
+          // User can click the button to manually stop when they're done
         };
       } else {
         setError('Seu navegador não suporta reconhecimento de voz');
