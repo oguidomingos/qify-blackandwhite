@@ -13,6 +13,8 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
 
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const speakingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const checkSpeakingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -70,8 +72,16 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
 
   const speak = useCallback((text: string) => {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      // Cancel any ongoing speech
+      console.log('🗣️ Starting speech:', text.substring(0, 50) + '...');
+
+      // Cancel any ongoing speech and clear timers
       window.speechSynthesis.cancel();
+      if (speakingTimeoutRef.current) {
+        clearTimeout(speakingTimeoutRef.current);
+      }
+      if (checkSpeakingIntervalRef.current) {
+        clearInterval(checkSpeakingIntervalRef.current);
+      }
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'pt-BR';
@@ -79,33 +89,101 @@ export function useVoiceAssistant({ onTranscript, onSpeakingChange }: VoiceAssis
       utterance.pitch = 1.0;
 
       utterance.onstart = () => {
+        console.log('🎤 Speech started');
         setIsSpeaking(true);
         onSpeakingChange?.(true);
       };
 
       utterance.onend = () => {
+        console.log('✅ Speech ended (onend event)');
         setIsSpeaking(false);
         onSpeakingChange?.(false);
+
+        if (speakingTimeoutRef.current) {
+          clearTimeout(speakingTimeoutRef.current);
+        }
+        if (checkSpeakingIntervalRef.current) {
+          clearInterval(checkSpeakingIntervalRef.current);
+        }
       };
 
       utterance.onerror = (event) => {
-        console.error('Speech synthesis error:', event);
+        console.error('❌ Speech synthesis error:', event);
         setIsSpeaking(false);
         onSpeakingChange?.(false);
+
+        if (speakingTimeoutRef.current) {
+          clearTimeout(speakingTimeoutRef.current);
+        }
+        if (checkSpeakingIntervalRef.current) {
+          clearInterval(checkSpeakingIntervalRef.current);
+        }
       };
 
       synthesisRef.current = utterance;
       window.speechSynthesis.speak(utterance);
+
+      // Safety mechanism 1: Timeout after 30 seconds
+      speakingTimeoutRef.current = setTimeout(() => {
+        console.warn('⚠️ Speech timeout after 30s - forcing end');
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.cancel();
+        }
+        setIsSpeaking(false);
+        onSpeakingChange?.(false);
+      }, 30000);
+
+      // Safety mechanism 2: Check every 500ms if speech has finished
+      let checkCount = 0;
+      checkSpeakingIntervalRef.current = setInterval(() => {
+        checkCount++;
+        const stillSpeaking = window.speechSynthesis.speaking || window.speechSynthesis.pending;
+        console.log(`🔍 Check ${checkCount}: still speaking?`, stillSpeaking);
+
+        if (!stillSpeaking && isSpeaking) {
+          console.log('✅ Speech detected as finished via polling - forcing callback');
+          setIsSpeaking(false);
+          onSpeakingChange?.(false);
+
+          if (checkSpeakingIntervalRef.current) {
+            clearInterval(checkSpeakingIntervalRef.current);
+          }
+          if (speakingTimeoutRef.current) {
+            clearTimeout(speakingTimeoutRef.current);
+          }
+        }
+      }, 500);
     }
-  }, [onSpeakingChange]);
+  }, [onSpeakingChange, isSpeaking]);
 
   const stopSpeaking = useCallback(() => {
+    console.log('🛑 Stopping speech manually');
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
       onSpeakingChange?.(false);
+
+      // Clear timers
+      if (speakingTimeoutRef.current) {
+        clearTimeout(speakingTimeoutRef.current);
+      }
+      if (checkSpeakingIntervalRef.current) {
+        clearInterval(checkSpeakingIntervalRef.current);
+      }
     }
   }, [onSpeakingChange]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (speakingTimeoutRef.current) {
+        clearTimeout(speakingTimeoutRef.current);
+      }
+      if (checkSpeakingIntervalRef.current) {
+        clearInterval(checkSpeakingIntervalRef.current);
+      }
+    };
+  }, []);
 
   return {
     isListening,
