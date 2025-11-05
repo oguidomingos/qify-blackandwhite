@@ -4,8 +4,6 @@ interface VoiceConversationProps {
   onUserMessage?: (text: string) => void;
   onAIResponse?: (text: string) => void;
   onSilenceDetected?: () => void;
-  silenceThreshold?: number; // ms of silence before triggering
-  volumeThreshold?: number; // 0-255, minimum volume to consider as speech
 }
 
 interface ConversationTurn {
@@ -17,9 +15,7 @@ interface ConversationTurn {
 export function useVoiceConversation({
   onUserMessage,
   onAIResponse,
-  onSilenceDetected,
-  silenceThreshold = 2000, // 2 seconds of silence
-  volumeThreshold = 30 // minimum volume threshold
+  onSilenceDetected
 }: VoiceConversationProps = {}) {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -30,13 +26,6 @@ export function useVoiceConversation({
 
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const microphoneRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const volumeCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastSpeechTimeRef = useRef<number>(Date.now());
-  const streamRef = useRef<MediaStream | null>(null);
   const networkRetryCountRef = useRef<number>(0);
   const isRestartingRef = useRef<boolean>(false);
 
@@ -76,11 +65,6 @@ export function useVoiceConversation({
 
           const currentTranscript = finalTranscript || interimTranscript;
           setTranscript(currentTranscript);
-
-          // Reset silence timer when speech is detected
-          if (currentTranscript) {
-            lastSpeechTimeRef.current = Date.now();
-          }
 
           // When we have final transcript, just update it
           if (finalTranscript) {
@@ -216,89 +200,6 @@ export function useVoiceConversation({
     };
   }, [currentTurn]);
 
-  // Initialize Audio Context for volume detection - OPTIONAL, barely used now
-  const initAudioContext = useCallback(async () => {
-    try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 512;
-      analyserRef.current.smoothingTimeConstant = 0.8;
-
-      microphoneRef.current.connect(analyserRef.current);
-
-      // Removed log spam
-    } catch (err) {
-      console.error('Error initializing audio context:', err);
-    }
-  }, []);
-
-  // Check volume levels to detect silence
-  const checkVolume = useCallback(() => {
-    if (!analyserRef.current) return 0;
-
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getByteFrequencyData(dataArray);
-
-    // Calculate average volume
-    const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-    return average;
-  }, []);
-
-  // Start monitoring for silence - SIMPLIFIED (user clicks button, this is just backup)
-  const startSilenceDetection = useCallback(() => {
-    console.log('🎯 Silence detection started (backup only - user should click button)');
-    if (volumeCheckIntervalRef.current) {
-      clearInterval(volumeCheckIntervalRef.current);
-    }
-
-    lastSpeechTimeRef.current = Date.now();
-    let lastTranscript = '';
-
-    volumeCheckIntervalRef.current = setInterval(() => {
-      const volume = checkVolume();
-      const now = Date.now();
-      const timeSinceLastSpeech = now - lastSpeechTimeRef.current;
-
-      // If volume is above threshold, update last speech time
-      if (volume > volumeThreshold) {
-        lastSpeechTimeRef.current = now;
-        // Removed excessive logging
-      }
-
-      // Check if transcript has changed
-      if (transcript !== lastTranscript) {
-        lastTranscript = transcript;
-        lastSpeechTimeRef.current = now;
-        // Removed excessive logging
-      }
-
-      // If silence has been detected for longer than threshold AND we have a transcript
-      if (timeSinceLastSpeech > silenceThreshold && transcript.trim().length > 0) {
-        console.log('🤫 Silence detected after long timeout. Transcript:', transcript.substring(0, 30));
-        stopSilenceDetection();
-        onSilenceDetected?.();
-      }
-    }, 500); // Check every 500ms (less frequent)
-  }, [checkVolume, silenceThreshold, volumeThreshold, transcript, onSilenceDetected]);
-
-  const stopSilenceDetection = useCallback(() => {
-    if (volumeCheckIntervalRef.current) {
-      clearInterval(volumeCheckIntervalRef.current);
-      volumeCheckIntervalRef.current = null;
-    }
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-  }, []);
-
   const startListening = useCallback(async () => {
     console.log('🎤 startListening called. isListening:', isListening, 'recognitionRef:', !!recognitionRef.current);
 
@@ -324,20 +225,10 @@ export function useVoiceConversation({
     setCurrentTurn('user');
 
     try {
-      console.log('🎤 Initializing audio context...');
-      await initAudioContext();
-
-      // Extra safety: ensure recognition is fully stopped
-      await new Promise(resolve => setTimeout(resolve, 100));
-
       console.log('🎤 Starting speech recognition...');
       recognitionRef.current.start();
       setIsListening(true);
-
-      console.log('🎤 Starting silence detection...');
-      startSilenceDetection();
-
-      console.log('✅ Started listening with silence detection');
+      console.log('✅ Started listening');
     } catch (err: any) {
       console.error('❌ Error starting recognition:', err);
 
@@ -349,7 +240,6 @@ export function useVoiceConversation({
           await new Promise(resolve => setTimeout(resolve, 500));
           recognitionRef.current.start();
           setIsListening(true);
-          startSilenceDetection();
           console.log('✅ Recovered and restarted recognition');
         } catch (retryErr) {
           console.error('❌ Failed to recover:', retryErr);
@@ -359,7 +249,7 @@ export function useVoiceConversation({
         setError('Erro ao iniciar reconhecimento de voz: ' + err.message);
       }
     }
-  }, [isListening, initAudioContext, startSilenceDetection]);
+  }, [isListening]);
 
   const stopListening = useCallback(() => {
     console.log('🛑 stopListening called. isListening:', isListening);
@@ -380,13 +270,6 @@ export function useVoiceConversation({
 
       setIsListening(false);
       setCurrentTurn('idle');
-      stopSilenceDetection();
-
-      // Clean up audio context
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
 
       console.log('🛑 Stopped listening');
 
@@ -401,7 +284,7 @@ export function useVoiceConversation({
         onUserMessage?.(transcript);
       }
     }
-  }, [isListening, transcript, onUserMessage, stopSilenceDetection]);
+  }, [isListening, transcript, onUserMessage]);
 
   const speak = useCallback((text: string, onComplete?: () => void) => {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -469,15 +352,9 @@ export function useVoiceConversation({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopSilenceDetection();
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
+      // Cleanup on unmount
     };
-  }, [stopSilenceDetection]);
+  }, []);
 
   return {
     isListening,

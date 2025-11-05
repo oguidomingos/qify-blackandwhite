@@ -53,9 +53,7 @@ export function VoiceConversationModal({
     stopSpeaking,
     resetConversation
   } = useVoiceConversation({
-    onSilenceDetected: handleSilenceDetected,
-    silenceThreshold: 60000, // 60 seconds - effectively disabled, user clicks button
-    volumeThreshold: 200 // Very high threshold - effectively disabled
+    onSilenceDetected: handleSilenceDetected
   });
 
   // Auto-scroll to bottom when new messages arrive
