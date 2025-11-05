@@ -30,6 +30,7 @@ export function useVoiceConversation({
   const networkRetryCountRef = useRef<number>(0);
   const isRestartingRef = useRef<boolean>(false);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
+  const isRecoveringFromNetworkErrorRef = useRef<boolean>(false);
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -92,12 +93,15 @@ export function useVoiceConversation({
               networkRetryCountRef.current += 1;
               console.log(`🔄 Retry attempt ${networkRetryCountRef.current}/5`);
 
+              // Mark that we're recovering from network error so onend doesn't reset states
+              isRecoveringFromNetworkErrorRef.current = true;
+
               // Try to restart recognition after a longer delay
               const retryDelay = 1500 + (networkRetryCountRef.current * 500); // Progressive backoff: 2s, 2.5s, 3s, 3.5s, 4s
               console.log(`⏱️ Waiting ${retryDelay}ms before retry...`);
 
               setTimeout(() => {
-                if (currentTurn === 'user' && !isRestartingRef.current) {
+                if (isListening && !isRestartingRef.current) {
                   console.log('🔄 Restarting recognition after network error...');
                   isRestartingRef.current = true;
 
@@ -112,7 +116,7 @@ export function useVoiceConversation({
 
                   setTimeout(() => {
                     try {
-                      if (recognitionRef.current && currentTurn === 'user') {
+                      if (recognitionRef.current && isListening) {
                         recognitionRef.current.start();
                         console.log('✅ Recognition restarted after network error');
                       }
@@ -121,10 +125,14 @@ export function useVoiceConversation({
                       setError('Erro de conexão. Clique no microfone para reiniciar.');
                       setIsListening(false);
                       setCurrentTurn('idle');
+                      isRecoveringFromNetworkErrorRef.current = false;
                     } finally {
                       isRestartingRef.current = false;
                     }
                   }, 800); // Increased delay before restart
+                } else {
+                  console.log('⚠️ Cannot retry - isListening is false');
+                  isRecoveringFromNetworkErrorRef.current = false;
                 }
               }, retryDelay);
             } else {
@@ -133,6 +141,7 @@ export function useVoiceConversation({
               setIsListening(false);
               setCurrentTurn('idle');
               networkRetryCountRef.current = 0; // Reset for next time
+              isRecoveringFromNetworkErrorRef.current = false;
             }
             return;
           }
@@ -148,10 +157,22 @@ export function useVoiceConversation({
 
         recognitionRef.current.onstart = () => {
           console.log('🎤 Speech recognition STARTED (onstart event)');
+          // Clear network error recovery flag when successfully started
+          if (isRecoveringFromNetworkErrorRef.current) {
+            console.log('✅ Successfully recovered from network error');
+            isRecoveringFromNetworkErrorRef.current = false;
+            networkRetryCountRef.current = 0; // Reset retry counter on success
+          }
         };
 
         recognitionRef.current.onend = () => {
-          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'isListening:', isListening);
+          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'isListening:', isListening, 'isRecoveringFromNetworkError:', isRecoveringFromNetworkErrorRef.current);
+
+          // If we're recovering from a network error, don't reset states - let the retry logic handle it
+          if (isRecoveringFromNetworkErrorRef.current) {
+            console.log('🔄 In network error recovery mode - not resetting states');
+            return;
+          }
 
           // With continuous=false, we need to restart if user hasn't clicked stop yet
           // Check isListening instead of currentTurn because it's more reliable
@@ -258,9 +279,10 @@ export function useVoiceConversation({
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    // Reset network retry counter when user manually starts
+    // Reset network retry counter and flags when user manually starts
     networkRetryCountRef.current = 0;
     isRestartingRef.current = false;
+    isRecoveringFromNetworkErrorRef.current = false;
 
     setError(null);
     setTranscript('');
@@ -296,9 +318,10 @@ export function useVoiceConversation({
   const stopListening = useCallback(() => {
     console.log('🛑 stopListening called. isListening:', isListening);
 
-    // Reset retry counters
+    // Reset retry counters and flags
     networkRetryCountRef.current = 0;
     isRestartingRef.current = false;
+    isRecoveringFromNetworkErrorRef.current = false;
 
     // First set isListening to false to prevent auto-restart
     setIsListening(false);
