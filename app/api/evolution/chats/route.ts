@@ -394,28 +394,48 @@ export async function GET(request: Request) {
       const timeFilter = getTimeFilter(period);
       let filteredChats = realChats;
 
+      console.log(`📅 Applying filters - Period: ${period}, ActiveOnly: ${activeOnly}, ChatType: ${chatType}`);
+      console.log(`📊 Initial chats count: ${realChats.length}`);
+
       if (timeFilter > 0) {
+        const beforeCount = filteredChats.length;
         filteredChats = realChats.filter(chat => {
           const updatedTime = new Date(chat.updatedAt).getTime();
           return updatedTime >= timeFilter;
         });
+        console.log(`  ⏰ Time filter (${period}): ${beforeCount} -> ${filteredChats.length} chats`);
       }
 
       // Apply chat type filter
       if (chatType === 'individual') {
+        const beforeCount = filteredChats.length;
         filteredChats = filteredChats.filter(chat => !chat.remoteJid.endsWith('@g.us'));
+        console.log(`  👤 Individual filter: ${beforeCount} -> ${filteredChats.length} chats`);
       } else if (chatType === 'group') {
+        const beforeCount = filteredChats.length;
         filteredChats = filteredChats.filter(chat => chat.remoteJid.endsWith('@g.us'));
+        console.log(`  👥 Group filter: ${beforeCount} -> ${filteredChats.length} chats`);
       }
 
-      // Apply active filter
+      // Apply active filter - RELAXED to show more conversations
       if (activeOnly) {
+        const beforeCount = filteredChats.length;
         filteredChats = filteredChats.filter(chat => {
           const updatedTime = new Date(chat.updatedAt).getTime();
-          const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
-          return updatedTime >= dayAgo || chat.windowActive;
+          const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); // Changed from 24h to 7 days
+          const isRecent = updatedTime >= sevenDaysAgo;
+          const isWindowActive = chat.windowActive;
+
+          if (!isRecent && !isWindowActive) {
+            console.log(`  ❌ Filtered out ${chat.remoteJid.split('@')[0]}: too old (${Math.round((Date.now() - updatedTime) / (24 * 60 * 60 * 1000))} days)`);
+          }
+
+          return isRecent || isWindowActive;
         });
+        console.log(`  ✅ Active filter (7 days): ${beforeCount} -> ${filteredChats.length} chats`);
       }
+
+      console.log(`📊 Final chats count after all filters: ${filteredChats.length}`);
 
       // Transform to our format
       const transformedChats = filteredChats

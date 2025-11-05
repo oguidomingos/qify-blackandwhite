@@ -99,7 +99,7 @@ export default function InboxPage() {
 
         // Fetch active chats from Evolution API with chat type filter
         const response = await fetch(
-          `/api/evolution/chats?period=week&activeOnly=true&limit=50&chatType=${chatType}`,
+          `/api/evolution/chats?period=week&activeOnly=false&limit=50&chatType=${chatType}`,
           { signal: controller.signal }
         );
 
