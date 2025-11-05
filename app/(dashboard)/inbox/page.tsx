@@ -86,27 +86,59 @@ export default function InboxPage() {
   useEffect(() => {
     const fetchInboxData = async () => {
       try {
+        console.log('📥 Fetching inbox data...');
         setIsLoading(true);
         setError(null);
 
+        // Add timeout to prevent infinite loading
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          console.error('⏱️ Request timeout after 30 seconds');
+          controller.abort();
+        }, 30000); // 30 second timeout
+
         // Fetch active chats from Evolution API with chat type filter
-        const response = await fetch(`/api/evolution/chats?period=week&activeOnly=true&limit=50&chatType=${chatType}`);
+        const response = await fetch(
+          `/api/evolution/chats?period=week&activeOnly=true&limit=50&chatType=${chatType}`,
+          { signal: controller.signal }
+        );
+
+        clearTimeout(timeoutId);
+
+        console.log('📡 Response status:', response.status, response.ok);
+
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Response not OK:', response.status, errorText);
           throw new Error('Falha ao carregar chats');
         }
-        
+
         const data = await response.json();
+        console.log('📦 Data received:', {
+          success: data.success,
+          chatsCount: data.chats?.length,
+          statistics: data.statistics
+        });
+
         if (data.success) {
           setInboxData(data);
+          console.log('✅ Inbox data loaded successfully');
         } else {
           // Show specific error message from API
           const errorMsg = data.message || 'Erro ao processar dados do inbox';
+          console.error('❌ API returned success:false -', errorMsg);
           throw new Error(errorMsg);
         }
       } catch (err) {
-        console.error('Erro ao buscar dados do inbox:', err);
-        setError(err instanceof Error ? err.message : 'Erro desconhecido');
+        console.error('❌ Erro ao buscar dados do inbox:', err);
+
+        if (err instanceof Error && err.name === 'AbortError') {
+          setError('Requisição muito lenta. Tente novamente.');
+        } else {
+          setError(err instanceof Error ? err.message : 'Erro desconhecido');
+        }
       } finally {
+        console.log('🏁 Fetch completed, setting isLoading=false');
         setIsLoading(false);
       }
     };
