@@ -35,6 +35,39 @@ export const getByOrg = query({
   },
 });
 
+export const create = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    agentName: v.string(),
+    phoneNumber: v.optional(v.string()),
+    personality: v.string(),
+    toneOfVoice: v.string(),
+    language: v.string(),
+    responseTime: v.number(),
+    workingHours: v.object({
+      start: v.string(),
+      end: v.string(),
+      timezone: v.string(),
+      workDays: v.array(v.string()),
+    }),
+  },
+  handler: async (ctx: MutationCtx, args: any) => {
+    const now = Date.now();
+    return await ctx.db.insert("agent_configurations", {
+      orgId: args.orgId,
+      agentName: args.agentName,
+      phoneNumber: args.phoneNumber || "",
+      personality: args.personality,
+      toneOfVoice: args.toneOfVoice,
+      language: args.language,
+      responseTime: args.responseTime,
+      workingHours: args.workingHours,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
 export const upsert = mutation({
   args: {
     clerkOrgId: v.string(),

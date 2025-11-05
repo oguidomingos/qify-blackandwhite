@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Mic, Check, Edit, Users, Clock, Loader2 } from "lucide-react";
+import { MessageSquare, Mic, Users, Clock, Loader2 } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
+import { VoiceAssistantPanel } from "@/components/voice-assistant-panel";
 
 interface Contact {
   _id: string;
@@ -30,6 +31,34 @@ interface Chat {
   lastActivityAt: number;
 }
 
+interface Message {
+  _id: string;
+  contactId: string;
+  direction: "inbound" | "outbound";
+  text: string;
+  messageType: string;
+  timestamp: number;
+  senderName: string;
+  fromMe: boolean;
+}
+
+interface Conversation {
+  contactId: string;
+  contactName: string;
+  phoneNumber: string;
+  totalMessages: number;
+  messages: Message[];
+  recentMessages: Message[];
+  statistics: {
+    total: number;
+    inbound: number;
+    outbound: number;
+    lastMessageAt: number;
+    lastMessageDirection: "inbound" | "outbound";
+  };
+  lastMessage: Message | null;
+}
+
 interface InboxData {
   chats: Chat[];
   statistics: {
@@ -37,6 +66,8 @@ interface InboxData {
     active: number;
     unread: number;
     totalUnreadMessages: number;
+    groups?: number;
+    individuals?: number;
   };
 }
 
@@ -44,20 +75,22 @@ export default function InboxPage() {
   const { organization } = useOrganization();
   const { user } = useUser();
   const [selectedContact, setSelectedContact] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [inboxData, setInboxData] = useState<InboxData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [chatType, setChatType] = useState<'all' | 'individual' | 'group'>('individual');
 
   useEffect(() => {
     const fetchInboxData = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        
-        // Fetch active chats from Evolution API
-        const response = await fetch('/api/evolution/chats?period=week&activeOnly=true&limit=50');
+
+        // Fetch active chats from Evolution API with chat type filter
+        const response = await fetch(`/api/evolution/chats?period=week&activeOnly=true&limit=50&chatType=${chatType}`);
         if (!response.ok) {
           throw new Error('Falha ao carregar chats');
         }
@@ -79,11 +112,11 @@ export default function InboxPage() {
     };
 
     fetchInboxData();
-    
+
     // Refresh every 30 seconds
     const interval = setInterval(fetchInboxData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [chatType]);
 
   // Transform chats data for display
   const pendingContacts = inboxData?.chats?.map(chat => {
@@ -114,106 +147,67 @@ export default function InboxPage() {
     return `${days}d`;
   }
 
-  const handleContactClick = (contactId: string, contactName: string) => {
+  const handleContactClick = async (contactId: string, contactName: string, remoteJid: string) => {
     setSelectedContact(contactName);
-    setIsSpeaking(true);
-    
-    // Simulate AI speaking
-    setTimeout(() => {
-      setIsSpeaking(false);
-    }, 3000);
+    setSelectedContactId(remoteJid);
+    setLoadingConversation(true);
+
+    try {
+      // Fetch conversation messages from Evolution API
+      const response = await fetch(`/api/evolution/conversation?contactId=${encodeURIComponent(remoteJid)}&limit=100`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setConversation(data.conversation);
+          console.log('✅ Conversation loaded:', data.conversation.totalMessages, 'messages');
+        }
+      }
+    } catch (err) {
+      console.error('Error loading conversation:', err);
+    } finally {
+      setLoadingConversation(false);
+    }
   };
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording);
+  const handleMessageSent = () => {
+    // Refresh conversation after sending
+    if (selectedContactId) {
+      handleContactClick('temp', selectedContact || '', selectedContactId);
+    }
   };
 
   return (
     <div className="flex h-screen">
-      {/* Voice Visualization Center */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1 flex items-center justify-center py-12">
-          <div className="text-center">
-            {/* Voice Circle */}
-            <div className="w-48 h-48 rounded-full mx-auto mb-8 relative glass glass-hover">
-              <div className="absolute inset-4 rounded-full bg-primary/10 flex items-center justify-center">
-                {isSpeaking ? (
-                  <div className="w-24 h-24 rounded-full bg-primary/20 animate-voice-wave"></div>
-                ) : (
-                  <div className="speaking-dots">
-                    <div></div>
-                    <div></div>
-                    <div></div>
-                  </div>
-                )}
-              </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex items-center justify-center p-12">
+        <div className="text-center max-w-2xl">
+          <h1 className="text-4xl font-bold mb-4 text-foreground">Inbox WhatsApp</h1>
+          <p className="text-muted-foreground mb-6">
+            Selecione uma conversa para visualizar o histórico completo e usar o assistente de voz
+          </p>
+
+          {inboxData && (
+            <div className="grid grid-cols-3 gap-4 mt-8">
+              <Card className="glass">
+                <CardContent className="pt-6">
+                  <div className="text-3xl font-bold text-primary">{inboxData.statistics.individuals || 0}</div>
+                  <p className="text-sm text-muted-foreground">Conversas Individuais</p>
+                </CardContent>
+              </Card>
+              <Card className="glass">
+                <CardContent className="pt-6">
+                  <div className="text-3xl font-bold text-primary">{inboxData.statistics.groups || 0}</div>
+                  <p className="text-sm text-muted-foreground">Grupos</p>
+                </CardContent>
+              </Card>
+              <Card className="glass">
+                <CardContent className="pt-6">
+                  <div className="text-3xl font-bold text-primary">{inboxData.statistics.total || 0}</div>
+                  <p className="text-sm text-muted-foreground">Total de Conversas</p>
+                </CardContent>
+              </Card>
             </div>
-            
-            <div className="mt-8 space-y-4">
-              <h2 className="text-2xl font-semibold text-foreground">
-                {selectedContact ? `Falando sobre ${selectedContact}` : "Voice Assistant"}
-              </h2>
-              <div className="flex items-center justify-center space-x-2">
-                <div className="flex items-center justify-center space-x-2">
-                  {isSpeaking ? (
-                    <>
-                      <div className="speaking-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                      <span className="text-muted-foreground ml-2">IA está falando...</span>
-                    </>
-                  ) : isRecording ? (
-                    <>
-                      <div className="speaking-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                      <span className="text-muted-foreground ml-2">Fale sua mensagem</span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse"></div>
-                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse" style={{animationDelay: '0.2s'}}></div>
-                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse" style={{animationDelay: '0.4s'}}></div>
-                      <span className="text-muted-foreground ml-2">Ready to assist</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Floating Actions */}
-        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-20">
-          <div className="flex items-center space-x-4">
-            <Button
-              onClick={toggleRecording}
-              size="lg"
-              className={`glass glass-hover p-4 rounded-full transition-all duration-300 ${
-                isRecording ? 'ring-2 ring-red-500' : ''
-              }`}
-            >
-              <Mic className={`w-6 h-6 ${isRecording ? 'text-red-500' : 'text-primary'}`} />
-            </Button>
-
-            <Button 
-              size="lg"
-              className="glass glass-hover p-4 rounded-full transition-all duration-300 opacity-50 cursor-not-allowed"
-            >
-              <Check className="w-6 h-6 text-primary" />
-            </Button>
-
-            <Button
-              size="lg" 
-              className="glass glass-hover p-4 rounded-full transition-all duration-300 opacity-50 cursor-not-allowed"
-            >
-              <Edit className="w-6 h-6 text-primary" />
-            </Button>
-          </div>
+          )}
         </div>
       </div>
 
@@ -222,11 +216,39 @@ export default function InboxPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-foreground">
-              Contatos Pendentes
+              Conversas
             </h2>
             <Badge variant="secondary" className="glass">
               {pendingContacts.length}
             </Badge>
+          </div>
+
+          {/* Chat Type Filter */}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={chatType === 'individual' ? 'default' : 'outline'}
+              onClick={() => setChatType('individual')}
+              className="flex-1"
+            >
+              Individuais
+            </Button>
+            <Button
+              size="sm"
+              variant={chatType === 'group' ? 'default' : 'outline'}
+              onClick={() => setChatType('group')}
+              className="flex-1"
+            >
+              Grupos
+            </Button>
+            <Button
+              size="sm"
+              variant={chatType === 'all' ? 'default' : 'outline'}
+              onClick={() => setChatType('all')}
+              className="flex-1"
+            >
+              Todos
+            </Button>
           </div>
 
           <div className="space-y-3">
@@ -258,14 +280,18 @@ export default function InboxPage() {
             {!isLoading && !error && pendingContacts.length === 0 && (
               <div className="text-center p-4 text-muted-foreground">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Nenhuma conversa ativa</p>
+                <p className="text-sm">
+                  {chatType === 'individual' && 'Nenhuma conversa individual'}
+                  {chatType === 'group' && 'Nenhum grupo'}
+                  {chatType === 'all' && 'Nenhuma conversa ativa'}
+                </p>
               </div>
             )}
             {pendingContacts.map((contact) => (
               <div
                 key={contact.id}
                 className="glass glass-hover p-4 cursor-pointer transition-all duration-200"
-                onClick={() => handleContactClick(contact.id, contact.name)}
+                onClick={() => handleContactClick(contact.id, contact.name, contact.contact.contactId)}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
@@ -290,15 +316,8 @@ export default function InboxPage() {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
-                    {selectedContact === contact.name && isSpeaking && (
-                      <div className="speaking-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                    )}
                     <Clock className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{contact.time}</span>
                   </div>
@@ -309,75 +328,157 @@ export default function InboxPage() {
         </div>
       </div>
 
-      {/* Contextual Info Panel */}
-      <div className="w-80 border-l border-border/30 p-6 overflow-y-auto">
+      {/* Contextual Info Panel - Messages View */}
+      <div className="w-96 border-l border-border/30 p-6 overflow-y-auto">
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Informações Contextuais</h2>
+            <h2 className="text-lg font-semibold text-foreground">
+              {selectedContact ? "Histórico da Conversa" : "Informações Contextuais"}
+            </h2>
           </div>
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">Contato Atual</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-sm">
-                {selectedContact || "Nenhum contato selecionado"}
-              </p>
-            </CardContent>
-          </Card>
+          {selectedContact ? (
+            <>
+              {/* Contact Info Card */}
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">Contato</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="font-semibold text-foreground">{selectedContact}</p>
+                  {conversation && (
+                    <p className="text-xs text-muted-foreground">{conversation.phoneNumber}</p>
+                  )}
+                </CardContent>
+              </Card>
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">Personalidade do Agente</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <p className="text-muted-foreground text-sm">Profissional e Prestativo</p>
-              <div className="text-xs text-muted-foreground">
-                Responde de forma cordial e eficiente, mantendo tom profissional em todas as interações.
-              </div>
-            </CardContent>
-          </Card>
+              {/* Conversation Statistics */}
+              {conversation && (
+                <Card className="glass">
+                  <CardHeader>
+                    <CardTitle className="text-sm">Estatísticas da Conversa</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Total de mensagens</span>
+                      <span className="text-foreground">{conversation.totalMessages}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Recebidas</span>
+                      <span className="text-foreground">{conversation.statistics.inbound}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Enviadas</span>
+                      <span className="text-foreground">{conversation.statistics.outbound}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-          <Card className="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">Estatísticas</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Conversas ativas</span>
-                <span className="text-foreground">{inboxData?.statistics.active || 0}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Não lidas</span>
-                <span className="text-foreground">{inboxData?.statistics.totalUnreadMessages || 0}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total chats</span>
-                <span className="text-foreground">{inboxData?.statistics.total || 0}</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+              {/* Voice AI Assistant */}
+              {conversation && selectedContactId && (
+                <Card className="glass border-primary/20">
+                  <CardHeader>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Mic className="h-4 w-4" />
+                      Assistente de Voz
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <VoiceAssistantPanel
+                      conversation={conversation}
+                      contactName={selectedContact || ''}
+                      contactId={selectedContactId}
+                      onMessageSent={handleMessageSent}
+                    />
+                  </CardContent>
+                </Card>
+              )}
 
-      {/* Status Bar */}
-      <div className="fixed bottom-0 left-0 right-0 glass border-t border-border/30 p-4 z-20">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span>Connected</span>
-            </div>
-            <span>•</span>
-            <span>Voice Profile: vale</span>
-            <span>•</span>
-            <span>Ready</span>
-          </div>
-          
-          <div className="text-sm text-muted-foreground">
-            Powered by Advanced AI
-          </div>
+              {/* Messages List */}
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">
+                    Últimas Mensagens {loadingConversation && <Loader2 className="inline h-3 w-3 animate-spin ml-2" />}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {loadingConversation && (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        Carregando mensagens...
+                      </div>
+                    )}
+                    {!loadingConversation && conversation?.recentMessages.map((msg, idx) => (
+                      <div
+                        key={msg._id}
+                        className={`p-2 rounded-lg text-xs ${
+                          msg.fromMe
+                            ? 'bg-primary/10 text-foreground ml-4'
+                            : 'bg-secondary/50 text-foreground mr-4'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-xs">
+                            {msg.fromMe ? 'Você' : msg.senderName}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(msg.timestamp).toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-xs leading-relaxed">{msg.text}</p>
+                      </div>
+                    ))}
+                    {!loadingConversation && (!conversation || conversation.recentMessages.length === 0) && (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        Nenhuma mensagem encontrada
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <>
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">Contato Atual</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground text-sm">
+                    Nenhum contato selecionado
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">Estatísticas</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Conversas ativas</span>
+                    <span className="text-foreground">{inboxData?.statistics.active || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Individuais</span>
+                    <span className="text-foreground">{inboxData?.statistics.individuals || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Grupos</span>
+                    <span className="text-foreground">{inboxData?.statistics.groups || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Total</span>
+                    <span className="text-foreground">{inboxData?.statistics.total || 0}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       </div>
     </div>
