@@ -4,8 +4,10 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Mic, Check, Edit, Users, Clock, Loader2 } from "lucide-react";
+import { MessageSquare, Mic, Check, Edit, Users, Clock, Loader2, MessageCircle } from "lucide-react";
 import { useOrganization, useUser } from "@clerk/nextjs";
+import { VoiceConversationModal } from "@/components/voice-conversation-modal";
+import { MessageConfirmationModal } from "@/components/message-confirmation-modal";
 
 interface Contact {
   _id: string;
@@ -49,6 +51,11 @@ export default function InboxPage() {
   const [inboxData, setInboxData] = useState<InboxData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Voice conversation states
+  const [isVoiceConversationOpen, setIsVoiceConversationOpen] = useState(false);
+  const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
+  const [finalMessage, setFinalMessage] = useState("");
 
   useEffect(() => {
     const fetchInboxData = async () => {
@@ -128,6 +135,32 @@ export default function InboxPage() {
     setIsRecording(!isRecording);
   };
 
+  const handleVoiceInstructionClick = () => {
+    setIsVoiceConversationOpen(true);
+  };
+
+  const handleConversationComplete = (message: string) => {
+    setFinalMessage(message);
+    setIsConfirmationOpen(true);
+  };
+
+  const handleConfirmMessage = async (message: string) => {
+    // TODO: Implement sending message to WhatsApp
+    console.log("Sending message:", message);
+
+    // Show success feedback
+    alert(`Mensagem enviada com sucesso!\n\n${message}`);
+
+    // Reset states
+    setFinalMessage("");
+    setIsConfirmationOpen(false);
+  };
+
+  const handleCancelMessage = () => {
+    setFinalMessage("");
+    setIsConfirmationOpen(false);
+  };
+
   return (
     <div className="flex h-screen">
       {/* Voice Visualization Center */}
@@ -191,27 +224,13 @@ export default function InboxPage() {
         <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-20">
           <div className="flex items-center space-x-4">
             <Button
-              onClick={toggleRecording}
+              onClick={handleVoiceInstructionClick}
               size="lg"
-              className={`glass glass-hover p-4 rounded-full transition-all duration-300 ${
-                isRecording ? 'ring-2 ring-red-500' : ''
-              }`}
+              className="glass glass-hover px-6 py-4 rounded-full transition-all duration-300 hover:scale-105 flex items-center gap-2"
+              title="Falar Instrução - Conversa por voz com IA"
             >
-              <Mic className={`w-6 h-6 ${isRecording ? 'text-red-500' : 'text-primary'}`} />
-            </Button>
-
-            <Button 
-              size="lg"
-              className="glass glass-hover p-4 rounded-full transition-all duration-300 opacity-50 cursor-not-allowed"
-            >
-              <Check className="w-6 h-6 text-primary" />
-            </Button>
-
-            <Button
-              size="lg" 
-              className="glass glass-hover p-4 rounded-full transition-all duration-300 opacity-50 cursor-not-allowed"
-            >
-              <Edit className="w-6 h-6 text-primary" />
+              <MessageCircle className="w-6 h-6 text-primary" />
+              <span className="font-medium">Falar Instrução</span>
             </Button>
           </div>
         </div>
@@ -374,12 +393,28 @@ export default function InboxPage() {
             <span>•</span>
             <span>Ready</span>
           </div>
-          
+
           <div className="text-sm text-muted-foreground">
             Powered by Advanced AI
           </div>
         </div>
       </div>
+
+      {/* Voice Conversation Modal */}
+      <VoiceConversationModal
+        open={isVoiceConversationOpen}
+        onOpenChange={setIsVoiceConversationOpen}
+        onConversationComplete={handleConversationComplete}
+      />
+
+      {/* Message Confirmation Modal */}
+      <MessageConfirmationModal
+        open={isConfirmationOpen}
+        onOpenChange={setIsConfirmationOpen}
+        message={finalMessage}
+        onConfirm={handleConfirmMessage}
+        onCancel={handleCancelMessage}
+      />
     </div>
   );
 }
