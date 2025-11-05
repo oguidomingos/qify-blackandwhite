@@ -66,12 +66,17 @@ export function VoiceConversationModal({
   }, [conversationHistory, transcript]);
 
   function openConversation() {
+    console.log('🎬 Opening conversation modal...');
     setIsConversationOpen(true);
     resetConversation();
-    // Start listening after a short delay for modal animation
+
+    // First, let the AI speak, then start listening
     setTimeout(() => {
-      startListening();
-      speak("Olá! Como posso ajudar você a responder " + contactName + "?");
+      speak("Olá! Como posso ajudar você a responder " + contactName + "?", () => {
+        // After AI finishes speaking, start listening
+        console.log('✅ AI finished greeting, starting to listen...');
+        setTimeout(() => startListening(), 500);
+      });
     }, 500);
   }
 
@@ -250,17 +255,19 @@ export function VoiceConversationModal({
                 ))}
 
                 {/* Current transcript (while user is speaking) */}
-                {isListening && transcript && (
-                  <div className="flex items-start gap-3 flex-row-reverse animate-pulse">
-                    <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-blue-500/20 text-blue-600">
+                {isListening && currentTurn === 'user' && (
+                  <div className="flex items-start gap-3 flex-row-reverse">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-blue-500/20 text-blue-600 animate-pulse">
                       <User className="w-5 h-5" />
                     </div>
                     <div className="flex-1 text-right">
                       <div className="inline-block p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 border-dashed">
-                        <p className="text-sm leading-relaxed">{transcript}</p>
+                        <p className="text-sm leading-relaxed">
+                          {transcript || 'Aguardando sua fala...'}
+                        </p>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 px-2">
-                        Falando...
+                      <p className="text-xs text-muted-foreground mt-1 px-2 animate-pulse">
+                        🎤 Ouvindo {transcript ? '(detectando silêncio...)' : ''}
                       </p>
                     </div>
                   </div>

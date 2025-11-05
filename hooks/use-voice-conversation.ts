@@ -50,12 +50,21 @@ export function useVoiceConversation({
         recognitionRef.current.lang = 'pt-BR';
         recognitionRef.current.maxAlternatives = 1;
 
+        console.log('✅ Speech recognition initialized:', {
+          continuous: recognitionRef.current.continuous,
+          interimResults: recognitionRef.current.interimResults,
+          lang: recognitionRef.current.lang
+        });
+
         recognitionRef.current.onresult = (event: any) => {
+          console.log('🎤 onresult event fired! Results:', event.results.length);
           let interimTranscript = '';
           let finalTranscript = '';
 
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcriptPiece = event.results[i][0].transcript;
+            console.log(`  Result ${i}: "${transcriptPiece}" (final: ${event.results[i].isFinal})`);
+
             if (event.results[i].isFinal) {
               finalTranscript += transcriptPiece;
             } else {
@@ -80,18 +89,50 @@ export function useVoiceConversation({
         };
 
         recognitionRef.current.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
+          console.error('❌ Speech recognition error:', event.error, 'Message:', event.message);
           if (event.error !== 'no-speech') {
             setError(`Erro no reconhecimento: ${event.error}`);
           }
         };
 
+        recognitionRef.current.onstart = () => {
+          console.log('🎤 Speech recognition STARTED (onstart event)');
+        };
+
         recognitionRef.current.onend = () => {
-          console.log('🎤 Recognition ended');
-          // Only set to false if we're not in active listening mode
-          if (currentTurn !== 'user') {
+          console.log('🎤 Recognition ended. CurrentTurn:', currentTurn, 'Will restart:', currentTurn === 'user');
+
+          // If we're still in user turn, restart recognition
+          if (currentTurn === 'user') {
+            console.log('🔄 Restarting recognition automatically...');
+            try {
+              recognitionRef.current?.start();
+            } catch (err) {
+              console.error('❌ Error restarting recognition:', err);
+            }
+          } else {
             setIsListening(false);
           }
+        };
+
+        recognitionRef.current.onnomatch = () => {
+          console.log('⚠️ Speech recognition: no match');
+        };
+
+        recognitionRef.current.onsoundstart = () => {
+          console.log('🔊 Sound detected!');
+        };
+
+        recognitionRef.current.onsoundend = () => {
+          console.log('🔇 Sound ended');
+        };
+
+        recognitionRef.current.onspeechstart = () => {
+          console.log('🗣️ Speech started!');
+        };
+
+        recognitionRef.current.onspeechend = () => {
+          console.log('🗣️ Speech ended');
         };
       } else {
         setError('Seu navegador não suporta reconhecimento de voz');
@@ -142,11 +183,13 @@ export function useVoiceConversation({
 
   // Start monitoring for silence
   const startSilenceDetection = useCallback(() => {
+    console.log('🎯 Starting silence detection...');
     if (volumeCheckIntervalRef.current) {
       clearInterval(volumeCheckIntervalRef.current);
     }
 
     lastSpeechTimeRef.current = Date.now();
+    let lastTranscript = '';
 
     volumeCheckIntervalRef.current = setInterval(() => {
       const volume = checkVolume();
@@ -156,11 +199,19 @@ export function useVoiceConversation({
       // If volume is above threshold, update last speech time
       if (volume > volumeThreshold) {
         lastSpeechTimeRef.current = now;
+        console.log('🔊 Volume detected:', Math.round(volume));
       }
 
-      // If silence has been detected for longer than threshold
+      // Check if transcript has changed
+      if (transcript !== lastTranscript) {
+        lastTranscript = transcript;
+        lastSpeechTimeRef.current = now;
+        console.log('📝 Transcript updated, resetting silence timer');
+      }
+
+      // If silence has been detected for longer than threshold AND we have a transcript
       if (timeSinceLastSpeech > silenceThreshold && transcript.trim().length > 0) {
-        console.log('🤫 Silence detected! Triggering callback...');
+        console.log('🤫 Silence detected! Time since last speech:', timeSinceLastSpeech, 'ms. Transcript:', transcript.substring(0, 30));
         stopSilenceDetection();
         onSilenceDetected?.();
       }
@@ -179,21 +230,31 @@ export function useVoiceConversation({
   }, []);
 
   const startListening = useCallback(async () => {
+    console.log('🎤 startListening called. isListening:', isListening, 'recognitionRef:', !!recognitionRef.current);
+
     if (recognitionRef.current && !isListening) {
       setError(null);
       setTranscript('');
       setCurrentTurn('user');
 
       try {
+        console.log('🎤 Initializing audio context...');
         await initAudioContext();
+
+        console.log('🎤 Starting speech recognition...');
         recognitionRef.current.start();
         setIsListening(true);
+
+        console.log('🎤 Starting silence detection...');
         startSilenceDetection();
-        console.log('🎤 Started listening with silence detection');
+
+        console.log('✅ Started listening with silence detection');
       } catch (err) {
-        console.error('Error starting recognition:', err);
-        setError('Erro ao iniciar reconhecimento de voz');
+        console.error('❌ Error starting recognition:', err);
+        setError('Erro ao iniciar reconhecimento de voz: ' + (err as Error).message);
       }
+    } else {
+      console.warn('⚠️ Cannot start listening. recognitionRef:', !!recognitionRef.current, 'isListening:', isListening);
     }
   }, [isListening, initAudioContext, startSilenceDetection]);
 
