@@ -60,16 +60,12 @@ export function useVoiceConversation({
           lang: recognitionRef.current.lang
         });
 
-        console.log('💡 Tip: If you see network errors, they are usually temporary. The system will retry automatically.');
-
         recognitionRef.current.onresult = (event: any) => {
-          console.log('🎤 onresult event fired! Results:', event.results.length);
           let interimTranscript = '';
           let finalTranscript = '';
 
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcriptPiece = event.results[i][0].transcript;
-            console.log(`  Result ${i}: "${transcriptPiece}" (final: ${event.results[i].isFinal})`);
 
             if (event.results[i].isFinal) {
               finalTranscript += transcriptPiece;
@@ -79,7 +75,6 @@ export function useVoiceConversation({
           }
 
           const currentTranscript = finalTranscript || interimTranscript;
-          console.log('📝 Real-time transcript:', currentTranscript);
           setTranscript(currentTranscript);
 
           // Reset silence timer when speech is detected
@@ -87,9 +82,9 @@ export function useVoiceConversation({
             lastSpeechTimeRef.current = Date.now();
           }
 
-          // When we have final transcript, add to conversation
+          // When we have final transcript, just update it
           if (finalTranscript) {
-            console.log('✅ Final transcript:', finalTranscript);
+            console.log('✅ Final transcript:', finalTranscript.substring(0, 50));
             setTranscript(finalTranscript);
           }
         };
@@ -221,7 +216,7 @@ export function useVoiceConversation({
     };
   }, [currentTurn]);
 
-  // Initialize Audio Context for volume detection
+  // Initialize Audio Context for volume detection - OPTIONAL, barely used now
   const initAudioContext = useCallback(async () => {
     try {
       if (!audioContextRef.current) {
@@ -238,7 +233,7 @@ export function useVoiceConversation({
 
       microphoneRef.current.connect(analyserRef.current);
 
-      console.log('🎤 Audio context initialized for silence detection');
+      // Removed log spam
     } catch (err) {
       console.error('Error initializing audio context:', err);
     }
@@ -256,9 +251,9 @@ export function useVoiceConversation({
     return average;
   }, []);
 
-  // Start monitoring for silence
+  // Start monitoring for silence - SIMPLIFIED (user clicks button, this is just backup)
   const startSilenceDetection = useCallback(() => {
-    console.log('🎯 Starting silence detection...');
+    console.log('🎯 Silence detection started (backup only - user should click button)');
     if (volumeCheckIntervalRef.current) {
       clearInterval(volumeCheckIntervalRef.current);
     }
@@ -274,23 +269,23 @@ export function useVoiceConversation({
       // If volume is above threshold, update last speech time
       if (volume > volumeThreshold) {
         lastSpeechTimeRef.current = now;
-        console.log('🔊 Volume detected:', Math.round(volume));
+        // Removed excessive logging
       }
 
       // Check if transcript has changed
       if (transcript !== lastTranscript) {
         lastTranscript = transcript;
         lastSpeechTimeRef.current = now;
-        console.log('📝 Transcript updated, resetting silence timer');
+        // Removed excessive logging
       }
 
       // If silence has been detected for longer than threshold AND we have a transcript
       if (timeSinceLastSpeech > silenceThreshold && transcript.trim().length > 0) {
-        console.log('🤫 Silence detected! Time since last speech:', timeSinceLastSpeech, 'ms. Transcript:', transcript.substring(0, 30));
+        console.log('🤫 Silence detected after long timeout. Transcript:', transcript.substring(0, 30));
         stopSilenceDetection();
         onSilenceDetected?.();
       }
-    }, 100); // Check every 100ms
+    }, 500); // Check every 500ms (less frequent)
   }, [checkVolume, silenceThreshold, volumeThreshold, transcript, onSilenceDetected]);
 
   const stopSilenceDetection = useCallback(() => {
