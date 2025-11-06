@@ -12,6 +12,7 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
   const recognitionRef = useRef<any>(null);
   const accumulatedTranscriptRef = useRef<string>('');
   const isUserHoldingButtonRef = useRef<boolean>(false); // Track if user is still holding button
+  const networkRetryCountRef = useRef<number>(0); // Limit retries to prevent infinite loops
 
   // Initialize recognition once
   const initRecognition = useCallback(() => {
@@ -68,10 +69,33 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
         // Network errors are usually temporary Chrome/browser issues
         if (event.error === 'network') {
           console.warn('Network error in speech recognition - usually temporary');
+          console.log('🔍 Diagnostic info:', {
+            retryCount: networkRetryCountRef.current,
+            userHoldingButton: isUserHoldingButtonRef.current,
+            isRecording: isRecording,
+            hasPermission: 'Checking microphone permission...'
+          });
+
+          // Limit retries to prevent infinite loops
+          if (networkRetryCountRef.current >= 3) {
+            console.error('❌ Max network retries reached (3). This usually means:');
+            console.error('1. Microphone permission not granted');
+            console.error('2. No microphone available');
+            console.error('3. Another app is using the microphone');
+            console.error('4. Browser API issue - try refreshing the page');
+
+            setError('⚠️ Verifique se o microfone está permitido e disponível. Recarregue a página se necessário.');
+            setIsRecording(false);
+            isUserHoldingButtonRef.current = false;
+            networkRetryCountRef.current = 0;
+            return;
+          }
 
           // If user is still holding the button, try to restart automatically
           if (isUserHoldingButtonRef.current) {
-            console.log('🔄 User still holding button, attempting auto-restart...');
+            networkRetryCountRef.current += 1;
+            console.log(`🔄 User still holding button, attempting auto-restart (${networkRetryCountRef.current}/3)...`);
+
             setTimeout(() => {
               if (isUserHoldingButtonRef.current && recognitionRef.current) {
                 try {
@@ -80,11 +104,13 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
                 } catch (err) {
                   console.error('Failed to auto-restart:', err);
                   setError('Erro de conexão. Solte e segure novamente.');
+                  networkRetryCountRef.current = 0;
                 }
               }
             }, 500);
           } else {
             setError('Erro de conexão temporário. Tente novamente.');
+            networkRetryCountRef.current = 0;
           }
           return;
         }
@@ -105,16 +131,31 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
     }
   }, [onTranscriptComplete]);
 
-  const startRecording = useCallback(() => {
+  const startRecording = useCallback(async () => {
     initRecognition();
 
     if (!recognitionRef.current) return;
+
+    // Check microphone permission first
+    try {
+      console.log('🎤 Checking microphone permission...');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('✅ Microphone permission granted');
+
+      // Stop the test stream immediately
+      stream.getTracks().forEach(track => track.stop());
+    } catch (permErr) {
+      console.error('❌ Microphone permission denied or unavailable:', permErr);
+      setError('Permissão do microfone negada. Clique no ícone de cadeado na barra de endereço para permitir.');
+      return;
+    }
 
     try {
       accumulatedTranscriptRef.current = '';
       setTranscript('');
       setError(null);
       isUserHoldingButtonRef.current = true; // User is holding button
+      networkRetryCountRef.current = 0; // Reset retry counter on new recording
       recognitionRef.current.start();
       setIsRecording(true);
       console.log('🎤 Started recording');
