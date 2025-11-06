@@ -11,6 +11,7 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
 
   const recognitionRef = useRef<any>(null);
   const accumulatedTranscriptRef = useRef<string>('');
+  const isUserHoldingButtonRef = useRef<boolean>(false); // Track if user is still holding button
 
   // Initialize recognition once
   const initRecognition = useCallback(() => {
@@ -25,7 +26,7 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
 
     if (!recognitionRef.current) {
       const recognition = new SpeechRecognition();
-      recognition.continuous = true;
+      recognition.continuous = false; // Single recording session for push-to-talk
       recognition.interimResults = true;
       recognition.lang = 'pt-BR';
       recognition.maxAlternatives = 1;
@@ -55,15 +56,41 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
       recognition.onerror = (event: any) => {
         console.error('Speech recognition error:', event.error);
 
+        // Ignore harmless errors
         if (event.error === 'no-speech') {
-          return;
+          return; // Normal - no speech detected
         }
 
         if (event.error === 'aborted') {
+          return; // Normal - user stopped manually
+        }
+
+        // Network errors are usually temporary Chrome/browser issues
+        if (event.error === 'network') {
+          console.warn('Network error in speech recognition - usually temporary');
+
+          // If user is still holding the button, try to restart automatically
+          if (isUserHoldingButtonRef.current) {
+            console.log('🔄 User still holding button, attempting auto-restart...');
+            setTimeout(() => {
+              if (isUserHoldingButtonRef.current && recognitionRef.current) {
+                try {
+                  recognitionRef.current.start();
+                  console.log('✅ Auto-restarted after network error');
+                } catch (err) {
+                  console.error('Failed to auto-restart:', err);
+                  setError('Erro de conexão. Solte e segure novamente.');
+                }
+              }
+            }, 500);
+          } else {
+            setError('Erro de conexão temporário. Tente novamente.');
+          }
           return;
         }
 
-        setError(`Erro: ${event.error}`);
+        // For other errors, show user-friendly message
+        setError('Erro ao reconhecer voz. Tente falar novamente.');
       };
 
       recognition.onend = () => {
@@ -87,16 +114,20 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
       accumulatedTranscriptRef.current = '';
       setTranscript('');
       setError(null);
+      isUserHoldingButtonRef.current = true; // User is holding button
       recognitionRef.current.start();
       setIsRecording(true);
       console.log('🎤 Started recording');
     } catch (err) {
       console.error('Error starting recognition:', err);
       setError('Erro ao iniciar gravação');
+      isUserHoldingButtonRef.current = false;
     }
   }, [initRecognition]);
 
   const stopRecording = useCallback(() => {
+    isUserHoldingButtonRef.current = false; // User released button
+
     if (recognitionRef.current && isRecording) {
       try {
         recognitionRef.current.stop();
