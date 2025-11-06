@@ -4,6 +4,8 @@ interface UsePushToTalkProps {
   onTranscriptComplete: (text: string) => void;
 }
 
+type RecordingState = 'idle' | 'starting' | 'recording' | 'stopping';
+
 export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -11,12 +13,19 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
 
   const recognitionRef = useRef<any>(null);
   const accumulatedTranscriptRef = useRef<string>('');
-  const isUserHoldingButtonRef = useRef<boolean>(false); // Track if user is still holding button
-  const networkRetryCountRef = useRef<number>(0); // Limit retries to prevent infinite loops
+  const recordingStateRef = useRef<RecordingState>('idle');
+  const networkRetryCountRef = useRef<number>(0);
+  const micStreamRef = useRef<MediaStream | null>(null);
 
   // Initialize recognition once
   const initRecognition = useCallback(() => {
     if (typeof window === 'undefined') return;
+
+    // Check for secure context (HTTPS or localhost)
+    if (!window.isSecureContext) {
+      setError('⚠️ Reconhecimento de voz requer HTTPS ou localhost');
+      return;
+    }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -27,10 +36,35 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
 
     if (!recognitionRef.current) {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false; // Single recording session for push-to-talk
+
+      // STABLE CONFIGURATION: continuous true + interimResults true
+      // This is more reliable than continuous false
+      recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = 'pt-BR';
       recognition.maxAlternatives = 1;
+
+      // Diagnostic event handlers
+      recognition.onstart = () => {
+        console.log('✅ Recognition STARTED successfully');
+        recordingStateRef.current = 'recording';
+        setIsRecording(true);
+      };
+
+      recognition.onaudiostart = () => {
+        console.log('🎤 Audio capture STARTED');
+      };
+
+      recognition.onsoundstart = () => {
+        console.log('🔊 Sound DETECTED');
+      };
+
+      recognition.onspeechstart = () => {
+        console.log('🗣️ Speech DETECTED');
+        // Reset error when speech is successfully detected
+        setError(null);
+        networkRetryCountRef.current = 0; // Reset retry count on successful speech
+      };
 
       recognition.onresult = (event: any) => {
         let interimTranscript = '';
@@ -41,6 +75,7 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
 
           if (event.results[i].isFinal) {
             newFinalTranscript += transcriptPiece + ' ';
+            console.log('📝 Final transcript piece:', transcriptPiece);
           } else {
             interimTranscript += transcriptPiece;
           }
@@ -52,79 +87,116 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
 
         const fullTranscript = (accumulatedTranscriptRef.current + interimTranscript).trim();
         setTranscript(fullTranscript);
+
+        console.log('📋 Current transcript:', fullTranscript.substring(0, 50) + '...');
+      };
+
+      recognition.onspeechend = () => {
+        console.log('🗣️ Speech ENDED (user stopped talking)');
+        // Don't stop here - we'll stop when user releases button
+      };
+
+      recognition.onsoundend = () => {
+        console.log('🔇 Sound ENDED');
+      };
+
+      recognition.onaudioend = () => {
+        console.log('🎤 Audio capture ENDED');
       };
 
       recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
+        console.error('❌ Speech recognition error:', event.error);
+        console.log('🔍 Error state:', {
+          error: event.error,
+          recordingState: recordingStateRef.current,
+          retryCount: networkRetryCountRef.current
+        });
 
         // Ignore harmless errors
         if (event.error === 'no-speech') {
-          return; // Normal - no speech detected
-        }
-
-        if (event.error === 'aborted') {
-          return; // Normal - user stopped manually
-        }
-
-        // Network errors are usually temporary Chrome/browser issues
-        if (event.error === 'network') {
-          console.warn('Network error in speech recognition - usually temporary');
-          console.log('🔍 Diagnostic info:', {
-            retryCount: networkRetryCountRef.current,
-            userHoldingButton: isUserHoldingButtonRef.current,
-            isRecording: isRecording,
-            hasPermission: 'Checking microphone permission...'
-          });
-
-          // Limit retries to prevent infinite loops
-          if (networkRetryCountRef.current >= 3) {
-            console.error('❌ Max network retries reached (3). This usually means:');
-            console.error('1. Microphone permission not granted');
-            console.error('2. No microphone available');
-            console.error('3. Another app is using the microphone');
-            console.error('4. Browser API issue - try refreshing the page');
-
-            setError('⚠️ Verifique se o microfone está permitido e disponível. Recarregue a página se necessário.');
-            setIsRecording(false);
-            isUserHoldingButtonRef.current = false;
-            networkRetryCountRef.current = 0;
-            return;
-          }
-
-          // If user is still holding the button, try to restart automatically
-          if (isUserHoldingButtonRef.current) {
-            networkRetryCountRef.current += 1;
-            console.log(`🔄 User still holding button, attempting auto-restart (${networkRetryCountRef.current}/3)...`);
-
-            setTimeout(() => {
-              if (isUserHoldingButtonRef.current && recognitionRef.current) {
-                try {
-                  recognitionRef.current.start();
-                  console.log('✅ Auto-restarted after network error');
-                } catch (err) {
-                  console.error('Failed to auto-restart:', err);
-                  setError('Erro de conexão. Solte e segure novamente.');
-                  networkRetryCountRef.current = 0;
-                }
-              }
-            }, 500);
-          } else {
-            setError('Erro de conexão temporário. Tente novamente.');
-            networkRetryCountRef.current = 0;
-          }
+          console.log('⚠️ No speech detected (normal)');
           return;
         }
 
-        // For other errors, show user-friendly message
-        setError('Erro ao reconhecer voz. Tente falar novamente.');
+        if (event.error === 'aborted') {
+          console.log('⚠️ Recognition aborted (normal when user stops)');
+          return;
+        }
+
+        // Network errors - handle with exponential backoff
+        if (event.error === 'network') {
+          console.warn('🌐 Network error in speech recognition');
+
+          // Max 3 retries
+          if (networkRetryCountRef.current >= 3) {
+            console.error('❌ Max network retries reached (3)');
+            console.error('Possible causes:');
+            console.error('  1. Not on HTTPS or localhost');
+            console.error('  2. Google Speech API temporarily unavailable');
+            console.error('  3. Firewall/VPN blocking Google services');
+            console.error('  4. Regional restrictions');
+
+            setError('⚠️ Serviço de reconhecimento temporariamente indisponível. Tente recarregar a página.');
+            setIsRecording(false);
+            recordingStateRef.current = 'idle';
+            networkRetryCountRef.current = 0;
+
+            // Clean up microphone stream
+            if (micStreamRef.current) {
+              micStreamRef.current.getTracks().forEach(track => track.stop());
+              micStreamRef.current = null;
+            }
+            return;
+          }
+
+          // Retry with exponential backoff: 200ms, 500ms, 1000ms
+          const retryDelay = Math.min(200 * Math.pow(2, networkRetryCountRef.current), 1000);
+          networkRetryCountRef.current += 1;
+
+          console.log(`🔄 Retrying (${networkRetryCountRef.current}/3) after ${retryDelay}ms...`);
+
+          setTimeout(() => {
+            if (recordingStateRef.current !== 'idle' && recognitionRef.current) {
+              try {
+                console.log('🔄 Restarting recognition...');
+                recognitionRef.current.start();
+              } catch (err) {
+                console.error('Failed to restart:', err);
+                setError('Erro de conexão. Solte o botão e tente novamente.');
+                setIsRecording(false);
+                recordingStateRef.current = 'idle';
+                networkRetryCountRef.current = 0;
+              }
+            }
+          }, retryDelay);
+          return;
+        }
+
+        // Other errors
+        console.error('Unhandled error type:', event.error);
+        setError('Erro ao reconhecer voz. Tente novamente.');
+        setIsRecording(false);
+        recordingStateRef.current = 'idle';
       };
 
       recognition.onend = () => {
-        // When recognition ends, finalize the transcript
-        if (accumulatedTranscriptRef.current.trim()) {
+        console.log('🏁 Recognition ENDED');
+        console.log('Final accumulated transcript:', accumulatedTranscriptRef.current);
+
+        // Only call callback if we have transcript and we're in stopping state
+        if (recordingStateRef.current === 'stopping' && accumulatedTranscriptRef.current.trim()) {
+          console.log('✅ Sending transcript to callback');
           onTranscriptComplete(accumulatedTranscriptRef.current.trim());
         }
+
         setIsRecording(false);
+        recordingStateRef.current = 'idle';
+
+        // Clean up microphone stream
+        if (micStreamRef.current) {
+          micStreamRef.current.getTracks().forEach(track => track.stop());
+          micStreamRef.current = null;
+        }
       };
 
       recognitionRef.current = recognition;
@@ -132,52 +204,125 @@ export function usePushToTalk({ onTranscriptComplete }: UsePushToTalkProps) {
   }, [onTranscriptComplete]);
 
   const startRecording = useCallback(async () => {
-    initRecognition();
+    console.log('🎬 startRecording called, current state:', recordingStateRef.current);
 
-    if (!recognitionRef.current) return;
-
-    // Check microphone permission first
-    try {
-      console.log('🎤 Checking microphone permission...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log('✅ Microphone permission granted');
-
-      // Stop the test stream immediately
-      stream.getTracks().forEach(track => track.stop());
-    } catch (permErr) {
-      console.error('❌ Microphone permission denied or unavailable:', permErr);
-      setError('Permissão do microfone negada. Clique no ícone de cadeado na barra de endereço para permitir.');
+    // Prevent multiple starts
+    if (recordingStateRef.current !== 'idle') {
+      console.warn('⚠️ Already recording or starting, ignoring');
       return;
     }
 
+    recordingStateRef.current = 'starting';
+    initRecognition();
+
+    if (!recognitionRef.current) {
+      recordingStateRef.current = 'idle';
+      return;
+    }
+
+    // Request microphone permission and keep stream active during recording
+    try {
+      console.log('🎤 Requesting microphone permission...');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('✅ Microphone permission granted');
+
+      micStreamRef.current = stream;
+
+      // Wait for microphone to stabilize (150ms delay)
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+    } catch (permErr) {
+      console.error('❌ Microphone permission denied or unavailable:', permErr);
+      setError('Permissão do microfone negada. Clique no ícone de cadeado na barra de endereço para permitir.');
+      recordingStateRef.current = 'idle';
+      return;
+    }
+
+    // Start recognition
     try {
       accumulatedTranscriptRef.current = '';
       setTranscript('');
       setError(null);
-      isUserHoldingButtonRef.current = true; // User is holding button
-      networkRetryCountRef.current = 0; // Reset retry counter on new recording
+      networkRetryCountRef.current = 0;
+
+      console.log('🎤 Starting speech recognition...');
       recognitionRef.current.start();
-      setIsRecording(true);
-      console.log('🎤 Started recording');
-    } catch (err) {
-      console.error('Error starting recognition:', err);
-      setError('Erro ao iniciar gravação');
-      isUserHoldingButtonRef.current = false;
+      // State will be set to 'recording' in onstart handler
+
+    } catch (err: any) {
+      console.error('❌ Error starting recognition:', err);
+
+      // Handle "already started" error
+      if (err.message?.includes('already')) {
+        console.warn('Recognition already started, stopping and retrying...');
+        try {
+          recognitionRef.current.stop();
+          await new Promise(resolve => setTimeout(resolve, 300));
+          recognitionRef.current.start();
+        } catch (retryErr) {
+          setError('Erro ao iniciar gravação. Tente novamente.');
+          recordingStateRef.current = 'idle';
+          if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach(track => track.stop());
+            micStreamRef.current = null;
+          }
+        }
+      } else {
+        setError('Erro ao iniciar gravação');
+        recordingStateRef.current = 'idle';
+        if (micStreamRef.current) {
+          micStreamRef.current.getTracks().forEach(track => track.stop());
+          micStreamRef.current = null;
+        }
+      }
     }
   }, [initRecognition]);
 
   const stopRecording = useCallback(() => {
-    isUserHoldingButtonRef.current = false; // User released button
+    console.log('🛑 stopRecording called, current state:', recordingStateRef.current);
 
-    if (recognitionRef.current && isRecording) {
+    if (!recognitionRef.current) return;
+
+    // If still starting, abort instead of stop
+    if (recordingStateRef.current === 'starting') {
+      console.log('⚠️ User released while still starting, aborting...');
       try {
-        recognitionRef.current.stop();
-        console.log('🛑 Stopped recording');
+        recognitionRef.current.abort();
       } catch (err) {
-        console.error('Error stopping recognition:', err);
+        console.error('Error aborting:', err);
       }
+      recordingStateRef.current = 'idle';
+      setIsRecording(false);
+
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+        micStreamRef.current = null;
+      }
+      return;
     }
-  }, [isRecording]);
+
+    // If recording, stop gracefully with small delay
+    if (recordingStateRef.current === 'recording') {
+      recordingStateRef.current = 'stopping';
+
+      // Small delay (150ms) before calling stop to ensure we capture the last bit of speech
+      setTimeout(() => {
+        try {
+          console.log('🛑 Calling recognition.stop()');
+          recognitionRef.current.stop();
+        } catch (err) {
+          console.error('Error stopping recognition:', err);
+          recordingStateRef.current = 'idle';
+          setIsRecording(false);
+
+          if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach(track => track.stop());
+            micStreamRef.current = null;
+          }
+        }
+      }, 150);
+    }
+  }, []);
 
   const resetTranscript = useCallback(() => {
     accumulatedTranscriptRef.current = '';
