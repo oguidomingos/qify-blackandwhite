@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Mic, Send, X, Loader2, MessageCircle, Sparkles, Check } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Mic, Send, X, Loader2, MessageCircle, Sparkles, Check, Radio } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { usePushToTalk } from "@/hooks/use-push-to-talk";
+import { useHybridRecorder } from "@/hooks/use-hybrid-recorder";
 
 interface Message {
   role: 'user' | 'assistant';
@@ -41,7 +42,17 @@ export function VoiceChatAssistant({
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { isRecording, transcript, error, startRecording, stopRecording, resetTranscript } = usePushToTalk({
+  const {
+    isRecording,
+    transcript,
+    error,
+    isProcessing: isTranscribing,
+    method,
+    startRecording,
+    stopRecording,
+    resetTranscript,
+    switchToDeepgram
+  } = useHybridRecorder({
     onTranscriptComplete: handleUserMessage
   });
 
@@ -253,9 +264,15 @@ export function VoiceChatAssistant({
       <Dialog open={isChatOpen} onOpenChange={closeChat}>
         <DialogContent className="sm:max-w-[700px] h-[600px] p-0 gap-0 flex flex-col">
           <DialogHeader className="p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white">
-            <DialogTitle className="flex items-center gap-2">
-              <MessageCircle className="w-5 h-5" />
-              Assistente IA - {contactName}
+            <DialogTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageCircle className="w-5 h-5" />
+                Assistente IA - {contactName}
+              </div>
+              <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
+                <Radio className="w-3 h-3 mr-1" />
+                {method === 'deepgram' ? 'Deepgram' : 'Web Speech'}
+              </Badge>
             </DialogTitle>
           </DialogHeader>
 
@@ -296,7 +313,19 @@ export function VoiceChatAssistant({
               </div>
             )}
 
-            {/* Processing indicator */}
+            {/* Transcription processing indicator */}
+            {isTranscribing && (
+              <div className="flex justify-end">
+                <div className="rounded-2xl px-4 py-3 bg-purple-600/20 border-2 border-purple-600 border-dashed">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
+                    <span className="text-sm text-purple-600">Transcrevendo áudio...</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* AI processing indicator */}
             {isProcessing && (
               <div className="flex justify-start">
                 <div className="rounded-2xl px-4 py-3 bg-gray-100 dark:bg-gray-800">
@@ -324,16 +353,27 @@ export function VoiceChatAssistant({
                 onMouseUp={stopRecording}
                 onTouchStart={startRecording}
                 onTouchEnd={stopRecording}
-                disabled={isProcessing}
+                disabled={isProcessing || isTranscribing}
                 size="lg"
                 className={`flex-1 ${
                   isRecording
                     ? 'bg-red-600 hover:bg-red-700 animate-pulse'
+                    : isTranscribing
+                    ? 'bg-purple-600 hover:bg-purple-700'
                     : 'bg-blue-600 hover:bg-blue-700'
                 }`}
               >
-                <Mic className="w-5 h-5 mr-2" />
-                {isRecording ? 'Gravando... (solte para enviar)' : 'Segurar para falar'}
+                {isTranscribing ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Transcrevendo...
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-5 h-5 mr-2" />
+                    {isRecording ? 'Gravando... (solte para enviar)' : 'Segurar para falar'}
+                  </>
+                )}
               </Button>
 
               {/* Generate Final Message Button */}
