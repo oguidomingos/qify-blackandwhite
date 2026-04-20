@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { fetchMutation, fetchQuery } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
 
-// API key protegida (não exposta no código)
-const EVOLUTION_API_KEY = "509dbd54-c20c-4a5b-b889-a0494a861f5a";
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN;
+const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL;
 
 export async function POST(request: NextRequest) {
   try {
-    const { instanceName, phoneNumber, orgId } = await request.json();
+    const { orgId: userId, orgId: clerkOrgId } = auth();
+    const { instanceName, phoneNumber, orgId: clientOrgId } = await request.json();
 
     if (!instanceName || !phoneNumber) {
       return NextResponse.json(
@@ -14,11 +18,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Resolve orgId server-side if not provided by client
+    let orgId = clientOrgId;
+    if (!orgId) {
+      const { orgId: clerkOrg, userId: uid } = auth();
+      const organization = await fetchQuery(api.organizations.getViewerOrganization, {
+        clerkOrgId: clerkOrg || undefined,
+        userId: uid || undefined,
+      });
+      if (!organization) {
+        return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+      }
+      orgId = organization._id;
+    }
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Could not resolve organization" },
+        { status: 400 }
+      );
+    }
+
+    if (!EVOLUTION_API_KEY || !EVOLUTION_BASE_URL) {
+      return NextResponse.json(
+        { error: "Evolution API credentials are not configured" },
+        { status: 500 }
+      );
+    }
+
     console.log(`Creating WhatsApp instance: ${instanceName} for phone: ${phoneNumber}`);
 
     // Verificar se a instância já existe
     let instanceExists = false;
-    const checkResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/connectionState/${instanceName}`, {
+    const checkResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/connectionState/${instanceName}`, {
       headers: {
         'apikey': EVOLUTION_API_KEY,
       },
@@ -29,7 +61,7 @@ export async function POST(request: NextRequest) {
       instanceExists = true;
     } else {
       // Criar nova instância na Evolution API
-      const createResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/create`, {
+      const createResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -37,7 +69,7 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({
           instanceName,
-          token: process.env.EVOLUTION_SHARED_TOKEN,
+          token: process.env.EVOLUTION_SHARED_TOKEN || EVOLUTION_API_KEY,
           qrcode: true,
           integration: "WHATSAPP-BAILEYS"
         }),
@@ -63,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Tentar obter QR Code
-    const qrResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/connect/${instanceName}`, {
+    const qrResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/connect/${instanceName}`, {
       method: 'GET',
       headers: {
         'apikey': EVOLUTION_API_KEY,
@@ -80,7 +112,7 @@ export async function POST(request: NextRequest) {
       try {
         const baseUrl = process.env.WEBHOOK_URL || `${process.env.NEXT_PUBLIC_APP_URL || 'https://qify-blackandwhite.vercel.app'}`;
         const webhookUrl = `${baseUrl}/api/webhook/whatsapp/${instanceName}`;
-        const webhookResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/webhook/set/${instanceName}`, {
+        const webhookResponse = await fetch(`${EVOLUTION_BASE_URL}/webhook/set/${instanceName}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -112,14 +144,39 @@ export async function POST(request: NextRequest) {
       } catch (webhookError) {
         console.warn('Error configuring webhook:', webhookError);
       }
+
+      const qrCode = qrData.base64 || qrData.code || qrData.qrcode;
+      await fetchMutation(api.wa.upsertAccount, {
+        orgId,
+        instanceId: instanceName,
+        instanceName,
+        phoneNumber,
+        status: qrCode ? "qr_pending" : "connecting",
+        baseUrl: EVOLUTION_BASE_URL,
+        token: EVOLUTION_API_KEY,
+        sharedToken: process.env.EVOLUTION_SHARED_TOKEN || EVOLUTION_API_KEY,
+        qrCode,
+        lastQrAt: qrCode ? Date.now() : undefined,
+      });
       
       return NextResponse.json({
         success: true,
         instanceName,
-        qrCode: qrData.base64 || qrData.code || qrData.qrcode,
+        qrCode,
         message: "Instance created successfully"
       });
     } else {
+      await fetchMutation(api.wa.upsertAccount, {
+        orgId,
+        instanceId: instanceName,
+        instanceName,
+        phoneNumber,
+        status: instanceExists ? "disconnected" : "creating",
+        baseUrl: EVOLUTION_BASE_URL,
+        token: EVOLUTION_API_KEY,
+        sharedToken: process.env.EVOLUTION_SHARED_TOKEN || EVOLUTION_API_KEY,
+      });
+
       console.log('QR Code not available yet, returning without QR');
       return NextResponse.json({
         success: true,

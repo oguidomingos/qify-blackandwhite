@@ -1,21 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MessageSquare, Mic, Users, Clock, Loader2 } from "lucide-react";
-import { useOrganization, useUser } from "@clerk/nextjs";
 import { VoiceChatAssistant } from "@/components/voice-chat-assistant";
-
-interface Contact {
-  _id: string;
-  name: string;
-  phoneNumber: string;
-  channel: string;
-  lastMessageAt: number;
-  isActive: boolean;
-}
 
 interface Chat {
   _id: string;
@@ -29,6 +19,19 @@ interface Chat {
   };
   isActive: boolean;
   lastActivityAt: number;
+  isGroup?: boolean;
+}
+
+interface InboxData {
+  chats: Chat[];
+  statistics: {
+    total: number;
+    active: number;
+    unread: number;
+    totalUnreadMessages: number;
+    groups?: number;
+    individuals?: number;
+  };
 }
 
 interface Message {
@@ -59,108 +62,69 @@ interface Conversation {
   lastMessage: Message | null;
 }
 
-interface InboxData {
-  chats: Chat[];
-  statistics: {
-    total: number;
-    active: number;
-    unread: number;
-    totalUnreadMessages: number;
-    groups?: number;
-    individuals?: number;
-  };
-}
-
 export default function InboxPage() {
-  const { organization } = useOrganization();
-  const { user } = useUser();
-  const [selectedContact, setSelectedContact] = useState<string | null>(null);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
-  const [inboxData, setInboxData] = useState<InboxData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [loadingConversation, setLoadingConversation] = useState(false);
   const [chatType, setChatType] = useState<'all' | 'individual' | 'group'>('individual');
+  const [inboxData, setInboxData] = useState<InboxData | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchInboxData = async () => {
-      try {
-        console.log('📥 Fetching inbox data...');
-        setIsLoading(true);
-        setError(null);
-
-        // Add timeout to prevent infinite loading
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          console.error('⏱️ Request timeout after 30 seconds');
-          controller.abort();
-        }, 30000); // 30 second timeout
-
-        // Fetch active chats from Evolution API with chat type filter
-        const response = await fetch(
-          `/api/evolution/chats?period=week&activeOnly=false&limit=50&chatType=${chatType}`,
-          { signal: controller.signal }
-        );
-
-        clearTimeout(timeoutId);
-
-        console.log('📡 Response status:', response.status, response.ok);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Response not OK:', response.status, errorText);
-          throw new Error('Falha ao carregar chats');
-        }
-
-        const data = await response.json();
-        console.log('📦 Data received:', {
-          success: data.success,
-          chatsCount: data.chats?.length,
-          statistics: data.statistics
-        });
-
+    setIsLoading(true);
+    fetch(`/api/evolution/chats?limit=50&chatType=${chatType}`)
+      .then((res) => res.json())
+      .then((data) => {
         if (data.success) {
-          setInboxData(data);
-          console.log('✅ Inbox data loaded successfully');
+          setInboxData({ chats: data.chats || [], statistics: data.statistics || { total: 0, active: 0, unread: 0, totalUnreadMessages: 0 } });
+          setError(null);
         } else {
-          // Show specific error message from API
-          const errorMsg = data.message || 'Erro ao processar dados do inbox';
-          console.error('❌ API returned success:false -', errorMsg);
-          throw new Error(errorMsg);
+          setError(data.message || "Erro ao carregar conversas");
         }
-      } catch (err) {
-        console.error('❌ Erro ao buscar dados do inbox:', err);
-
-        if (err instanceof Error && err.name === 'AbortError') {
-          setError('Requisição muito lenta. Tente novamente.');
-        } else {
-          setError(err instanceof Error ? err.message : 'Erro desconhecido');
-        }
-      } finally {
-        console.log('🏁 Fetch completed, setting isLoading=false');
         setIsLoading(false);
-      }
-    };
-
-    fetchInboxData();
-
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchInboxData, 30000);
-    return () => clearInterval(interval);
+      })
+      .catch((err) => {
+        setError(err.message || "Erro ao carregar conversas");
+        setIsLoading(false);
+      });
   }, [chatType]);
 
-  // Transform chats data for display
-  const pendingContacts = inboxData?.chats?.map(chat => {
-    // Extract clean name (remove group emoji prefix if exists)
-    let displayName = chat.contactName || "Contato sem nome";
+  useEffect(() => {
+    if (!selectedContactId) {
+      setConversation(null);
+      return;
+    }
+    setLoadingConversation(true);
+    fetch(`/api/evolution/conversation?contactId=${encodeURIComponent(selectedContactId)}&limit=100`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          setConversation(data.conversation);
+        }
+        setLoadingConversation(false);
+      })
+      .catch(() => setLoadingConversation(false));
+  }, [selectedContactId]);
 
-    // Remove the 👥 emoji prefix for display (it's already visual in the UI)
+  function formatTimeAgo(timestamp: number) {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return "Agora";
+    if (minutes < 60) return `${minutes} min`;
+    if (hours < 24) return `${hours}h`;
+    return `${days}d`;
+  }
+
+  const pendingContacts = (inboxData?.chats || []).map((chat) => {
+    let displayName = chat.contactName || "Contato sem nome";
     if (displayName.startsWith('👥 ')) {
       displayName = displayName.substring(2).trim();
     }
-
-    // If the name is still just a phone number, format it better
     const phoneRegex = /^\+?\d+$/;
     if (phoneRegex.test(displayName)) {
       displayName = displayName.startsWith('+') ? displayName : `+${displayName}`;
@@ -176,52 +140,18 @@ export default function InboxPage() {
       contact: chat,
       unreadCount: chat.unreadCount,
       isActive: chat.isActive,
-      isGroup: chat.isGroup || false
+      isGroup: chat.isGroup || false,
     };
-  }) || [];
+  });
 
-  // Helper function to format time ago
-  function formatTimeAgo(timestamp: number) {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return "Agora";
-    if (minutes < 60) return `${minutes} min`;
-    if (hours < 24) return `${hours}h`;
-    return `${days}d`;
-  }
-
-  const handleContactClick = async (contactId: string, contactName: string, remoteJid: string) => {
-    setSelectedContact(contactName);
+  const handleContactClick = (_contactId: string, _contactName: string, remoteJid: string) => {
     setSelectedContactId(remoteJid);
-    setLoadingConversation(true);
-
-    try {
-      // Fetch conversation messages from Evolution API
-      const response = await fetch(`/api/evolution/conversation?contactId=${encodeURIComponent(remoteJid)}&limit=100`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setConversation(data.conversation);
-          console.log('✅ Conversation loaded:', data.conversation.totalMessages, 'messages');
-        }
-      }
-    } catch (err) {
-      console.error('Error loading conversation:', err);
-    } finally {
-      setLoadingConversation(false);
-    }
   };
 
-  const handleMessageSent = () => {
-    // Refresh conversation after sending
-    if (selectedContactId) {
-      handleContactClick('temp', selectedContact || '', selectedContactId);
-    }
-  };
+  const handleMessageSent = () => undefined;
+
+  const selectedChat = pendingContacts.find((c) => c.contact.contactId === selectedContactId);
+  const selectedContact = selectedChat?.name || null;
 
   return (
     <div className="flex h-screen">
@@ -262,38 +192,19 @@ export default function InboxPage() {
       <div className="w-96 px-6 py-8 border-l border-border/30 overflow-y-auto">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-foreground">
-              Conversas
-            </h2>
-            <Badge variant="secondary" className="glass">
-              {pendingContacts.length}
-            </Badge>
+            <h2 className="text-xl font-semibold text-foreground">Conversas</h2>
+            <Badge variant="secondary" className="glass">{pendingContacts.length}</Badge>
           </div>
 
           {/* Chat Type Filter */}
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant={chatType === 'individual' ? 'default' : 'outline'}
-              onClick={() => setChatType('individual')}
-              className="flex-1"
-            >
+            <Button size="sm" variant={chatType === 'individual' ? 'default' : 'outline'} onClick={() => setChatType('individual')} className="flex-1">
               Individuais
             </Button>
-            <Button
-              size="sm"
-              variant={chatType === 'group' ? 'default' : 'outline'}
-              onClick={() => setChatType('group')}
-              className="flex-1"
-            >
+            <Button size="sm" variant={chatType === 'group' ? 'default' : 'outline'} onClick={() => setChatType('group')} className="flex-1">
               Grupos
             </Button>
-            <Button
-              size="sm"
-              variant={chatType === 'all' ? 'default' : 'outline'}
-              onClick={() => setChatType('all')}
-              className="flex-1"
-            >
+            <Button size="sm" variant={chatType === 'all' ? 'default' : 'outline'} onClick={() => setChatType('all')} className="flex-1">
               Todos
             </Button>
           </div>
@@ -314,12 +225,7 @@ export default function InboxPage() {
                   <p className="text-sm font-medium text-red-600">Evolution API Indisponível</p>
                   <p className="text-xs text-muted-foreground">{error}</p>
                 </div>
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="mt-2"
-                  onClick={() => window.location.reload()}
-                >
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => window.location.reload()}>
                   Tentar novamente
                 </Button>
               </div>
@@ -369,12 +275,9 @@ export default function InboxPage() {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {contact.lastMessage}
-                      </p>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{contact.lastMessage}</p>
                     </div>
                   </div>
-
                   <div className="flex items-center space-x-2">
                     <Clock className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{contact.time}</span>
@@ -397,7 +300,6 @@ export default function InboxPage() {
 
           {selectedContact ? (
             <>
-              {/* Contact Info Card */}
               <Card className="glass">
                 <CardHeader>
                   <CardTitle className="text-sm">Contato</CardTitle>
@@ -410,7 +312,6 @@ export default function InboxPage() {
                 </CardContent>
               </Card>
 
-              {/* Conversation Statistics */}
               {conversation && (
                 <Card className="glass">
                   <CardHeader>
@@ -433,7 +334,6 @@ export default function InboxPage() {
                 </Card>
               )}
 
-              {/* Voice AI Assistant */}
               {conversation && selectedContactId && (
                 <Card className="glass border-primary/20">
                   <CardHeader>
@@ -453,7 +353,6 @@ export default function InboxPage() {
                 </Card>
               )}
 
-              {/* Messages List */}
               <Card className="glass">
                 <CardHeader>
                   <CardTitle className="text-sm">
@@ -467,7 +366,7 @@ export default function InboxPage() {
                         Carregando mensagens...
                       </div>
                     )}
-                    {!loadingConversation && conversation?.recentMessages.map((msg, idx) => (
+                    {!loadingConversation && conversation?.recentMessages.map((msg) => (
                       <div
                         key={msg._id}
                         className={`p-2 rounded-lg text-xs ${
@@ -477,14 +376,9 @@ export default function InboxPage() {
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-xs">
-                            {msg.fromMe ? 'Você' : msg.senderName}
-                          </span>
+                          <span className="font-semibold text-xs">{msg.fromMe ? 'Você' : msg.senderName}</span>
                           <span className="text-xs text-muted-foreground">
-                            {new Date(msg.timestamp).toLocaleTimeString('pt-BR', {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
+                            {new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                         <p className="text-xs leading-relaxed">{msg.text}</p>
@@ -506,9 +400,7 @@ export default function InboxPage() {
                   <CardTitle className="text-sm">Contato Atual</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-muted-foreground text-sm">
-                    Nenhum contato selecionado
-                  </p>
+                  <p className="text-muted-foreground text-sm">Nenhum contato selecionado</p>
                 </CardContent>
               </Card>
 

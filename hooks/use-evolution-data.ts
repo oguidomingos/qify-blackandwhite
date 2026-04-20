@@ -1,26 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
-
-interface EvolutionStats {
-  totalMessages: number;
-  totalContacts: number;
-  totalChats: number;
-  instanceStatus: string;
-  instanceName: string;
-  phoneNumber: string;
-  profileName: string;
-  lastUpdate: string;
-}
+import { useEffect, useState } from "react";
 
 interface DashboardData {
-  // Stats for cards
   todayMessages: number;
   activeContacts: number;
   activeSessions: number;
   responseTime: number;
-  
-  // SPIN methodology data
   spinSessions: Array<{
     id: string;
     contactId: string;
@@ -33,8 +19,6 @@ interface DashboardData {
     createdAt: number;
     summary?: string;
   }>;
-  
-  // Contacts list (mock based on Evolution data)
   contacts: Array<{
     _id: string;
     name: string;
@@ -43,8 +27,6 @@ interface DashboardData {
     lastMessageAt: number;
     createdAt: number;
   }>;
-  
-  // Recent messages
   recentMessages: Array<{
     _id: string;
     contactId: string;
@@ -52,117 +34,111 @@ interface DashboardData {
     text: string;
     createdAt: number;
   }>;
-  
-  // Loading states
   isLoading: boolean;
   error: string | null;
 }
 
+const EMPTY_STATE: DashboardData = {
+  todayMessages: 0,
+  activeContacts: 0,
+  activeSessions: 0,
+  responseTime: 3,
+  spinSessions: [],
+  contacts: [],
+  recentMessages: [],
+  isLoading: true,
+  error: null,
+};
+
+function spinStageFromShort(short: string): string {
+  switch (short) {
+    case "P": return "problem";
+    case "I": return "implication";
+    case "N": return "needPayoff";
+    case "S":
+    default: return "situation";
+  }
+}
+
 export function useEvolutionData(): DashboardData {
-  const [data, setData] = useState<DashboardData>({
-    todayMessages: 0,
-    activeContacts: 0,
-    activeSessions: 0,
-    responseTime: 3,
-    spinSessions: [],
-    contacts: [],
-    recentMessages: [],
-    isLoading: true,
-    error: null
-  });
+  const [data, setData] = useState<DashboardData>(EMPTY_STATE);
 
   useEffect(() => {
-    const fetchEvolutionData = async () => {
+    let cancelled = false;
+
+    async function load() {
       try {
-        // Fetch all data in parallel
-        const [statsResponse, messagesResponse, contactsResponse, spinResponse] = await Promise.all([
-          fetch('/api/evolution/instance-stats'),
-          fetch('/api/evolution/messages?period=today&limit=100'),
-          fetch('/api/evolution/contacts?limit=50'),
-          fetch('/api/evolution/spin-analysis?period=week')
+        const [statsRes, chatsRes, messagesRes, spinRes] = await Promise.all([
+          fetch("/api/evolution/instance-stats"),
+          fetch("/api/evolution/chats?limit=50"),
+          fetch("/api/evolution/messages?period=today&limit=100"),
+          fetch("/api/evolution/spin-analysis"),
         ]);
 
-        // Get all responses as JSON first
-        const statsData = await statsResponse.json();
-        const messagesData = await messagesResponse.json();
-        const contactsData = await contactsResponse.json();
-        const spinData = await spinResponse.json();
+        if (cancelled) return;
 
-        // Check for API failures and get specific error messages
-        const apiErrors: string[] = [];
-        
-        if (!statsResponse.ok) {
-          apiErrors.push(`Instance Stats: ${statsData.message || 'Failed to load'}`);
-        }
-        if (!messagesResponse.ok || !messagesData.success) {
-          apiErrors.push(`Messages: ${messagesData.message || 'Evolution API indisponível'}`);
-        }
-        if (!contactsResponse.ok || !contactsData.success) {
-          apiErrors.push(`Contacts: ${contactsData.message || 'Evolution API indisponível'}`);
-        }
-        if (!spinResponse.ok || !spinData.success) {
-          apiErrors.push(`SPIN Analysis: ${spinData.message || 'Análise indisponível'}`);
-        }
+        const [stats, chatsData, messagesData, spinData] = await Promise.all([
+          statsRes.json(),
+          chatsRes.json(),
+          messagesRes.json(),
+          spinRes.json(),
+        ]);
 
-        // If we have any API errors, show them in the error state
-        const errorMessage = apiErrors.length > 0 ? 
-          `Evolution API com problemas: ${apiErrors.join('; ')}` : 
-          null;
+        if (cancelled) return;
 
-        // Use successful data, defaulting to empty arrays for failed APIs
-        const stats: EvolutionStats = statsResponse.ok ? statsData : {
-          totalMessages: 0, totalContacts: 0, totalChats: 0, 
-          instanceStatus: 'offline', instanceName: 'N/A', 
-          phoneNumber: 'N/A', profileName: 'N/A', lastUpdate: new Date().toISOString()
-        };
+        const contacts = (chatsData.chats || []).map((chat: any) => ({
+          _id: String(chat._id),
+          name: chat.contactName || chat.contactId?.split("@")[0] || "Unknown",
+          channel: "whatsapp",
+          externalId: chat.contactId,
+          lastMessageAt: chat.lastActivityAt || chat.lastMessage?.timestamp || Date.now(),
+          createdAt: chat.lastActivityAt || Date.now(),
+        }));
 
-        // Use real data from APIs
-        const todayMessages = messagesData.statistics?.total || 0;
-        const recentMessages = messagesData.messages || [];
-        const contacts = contactsData.contacts || [];
-        const spinSessions = spinData.sessions || [];
+        const recentMessages = (messagesData.messages || []).map((message: any) => ({
+          _id: String(message._id),
+          contactId: String(message.contactId),
+          direction: message.direction as "inbound" | "outbound",
+          text: message.text,
+          createdAt: message.createdAt,
+        }));
 
-        // Transform SPIN sessions to match expected format
-        const transformedSessions = spinSessions.map((session: any) => ({
+        const spinSessions = (spinData.sessions || []).map((session: any) => ({
           id: session.contactId,
           contactId: session.contactId,
           status: session.qualified ? "qualified" : "active",
-          stage: "conversation",
-          spinStage: session.currentStage,
+          stage: session.currentStage,
+          spinStage: spinStageFromShort(session.currentStage),
           score: session.score,
           qualified: session.qualified,
-          lastActivityAt: session.lastActivity,
-          createdAt: session.lastActivity - (24 * 60 * 60 * 1000), // Estimate creation
-          summary: session.summary
+          lastActivityAt: session.lastActivity || Date.now(),
+          createdAt: session.lastActivity || Date.now(),
+          summary: session.summary || undefined,
         }));
 
         setData({
-          todayMessages: todayMessages,
-          activeContacts: stats.totalContacts,
-          activeSessions: stats.totalChats,
+          todayMessages: stats.totalMessages || 0,
+          activeContacts: stats.totalContacts || 0,
+          activeSessions: stats.totalChats || 0,
           responseTime: 3,
-          spinSessions: transformedSessions,
-          contacts: contacts,
-          recentMessages: recentMessages,
+          spinSessions,
+          contacts,
+          recentMessages,
           isLoading: false,
-          error: errorMessage
+          error: null,
         });
-        
-      } catch (error) {
-        console.error("Error fetching Evolution data:", error);
-        setData(prev => ({
+      } catch (err) {
+        if (cancelled) return;
+        setData((prev) => ({
           ...prev,
           isLoading: false,
-          error: error instanceof Error ? error.message : "Unknown error"
+          error: err instanceof Error ? err.message : "Failed to load data",
         }));
       }
-    };
+    }
 
-    fetchEvolutionData();
-    
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchEvolutionData, 30000);
-    return () => clearInterval(interval);
+    load();
+    return () => { cancelled = true; };
   }, []);
 
   return data;

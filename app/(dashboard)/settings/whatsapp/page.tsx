@@ -5,152 +5,104 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { 
-  MessageCircle, 
-  QrCode, 
-  RefreshCw, 
-  CheckCircle, 
+import {
+  MessageCircle,
+  QrCode,
+  RefreshCw,
+  CheckCircle,
   XCircle,
   AlertCircle
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useOrganization, useUser } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 
 export default function WhatsAppSettings() {
-  const { organization } = useOrganization();
-  const { user } = useUser();
   const [isConnecting, setIsConnecting] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState("disconnected"); // disconnected, connecting, connected, error
+  const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [instanceName, setInstanceName] = useState("");
-  
-  const orgId = organization?.id || user?.id;
-  
-  // Get agent configuration to get phone number
-  const agentConfig = useQuery(
-    api.agentConfigurations.getByOrg,
-    orgId ? { clerkOrgId: orgId } : "skip"
-  );
-  
-  useEffect(() => {
-    console.log('useEffect triggered, agentConfig:', agentConfig);
-    if (agentConfig?.phoneNumber) {
-      const generatedInstanceName = `qify-${agentConfig.phoneNumber.replace(/[^\d]/g, '')}`;
-      console.log('Generated instance name:', generatedInstanceName);
-      setInstanceName(generatedInstanceName);
-      
-      // Verificar status da instância ao carregar a página
-      checkExistingInstanceStatus(generatedInstanceName);
-    } else {
-      console.log('No agent config or phone number available');
-    }
-  }, [agentConfig]);
+  const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
 
-  const checkExistingInstanceStatus = async (instanceName: string) => {
+  useEffect(() => {
+    fetch("/api/settings/agent-info")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.phoneNumber) {
+          const generated = `qify-${data.phoneNumber.replace(/[^\d]/g, '')}`;
+          setPhoneNumber(data.phoneNumber);
+          setInstanceName(generated);
+          checkExistingInstanceStatus(generated);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  const checkExistingInstanceStatus = async (name: string) => {
     try {
-      console.log('Checking existing instance status for:', instanceName);
-      const statusResponse = await fetch(`/api/whatsapp/status/${instanceName}`);
-      
+      const statusResponse = await fetch(`/api/whatsapp/status/${name}`);
       if (statusResponse.ok) {
         const statusData = await statusResponse.json();
-        console.log('Existing instance status:', statusData);
-        
-        if (statusData.connected) {
-          setConnectionStatus("connected");
-          console.log('Instance already connected!');
-        } else {
-          setConnectionStatus("disconnected");
-          console.log('Instance exists but not connected');
-        }
+        setConnectionStatus(statusData.connected ? "connected" : "disconnected");
       } else {
-        console.log('Instance does not exist or API error');
         setConnectionStatus("disconnected");
       }
-    } catch (error) {
-      console.error('Error checking existing instance:', error);
+    } catch {
       setConnectionStatus("disconnected");
     }
   };
-  
+
   const handleConnect = async () => {
-    if (!agentConfig?.phoneNumber) {
+    if (!phoneNumber) {
       alert("Número de telefone não encontrado. Complete o onboarding primeiro.");
       return;
     }
-    
+
     setIsConnecting(true);
     setConnectionStatus("connecting");
-    
+
     try {
-      // Create WhatsApp instance using Evolution API MCP
       const response = await fetch('/api/whatsapp/create-instance', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          instanceName,
-          phoneNumber: agentConfig.phoneNumber,
-          orgId: orgId
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName, phoneNumber }),
       });
-      
-      if (!response.ok) {
-        throw new Error('Failed to create instance');
-      }
-      
+
+      if (!response.ok) throw new Error('Failed to create instance');
+
       const data = await response.json();
-      
+
       if (data.qrCode) {
         setQrCode(data.qrCode);
         setConnectionStatus("connecting");
-        
-        // Poll for connection status
+
         const pollStatus = setInterval(async () => {
           try {
-            console.log('Polling connection status...');
             const statusResponse = await fetch(`/api/whatsapp/status/${instanceName}`);
             const statusData = await statusResponse.json();
-            
-            console.log('Status response:', statusData);
-            
             if (statusData.connected) {
-              console.log('WhatsApp connected! Stopping polling.');
               setConnectionStatus("connected");
               setQrCode(null);
               clearInterval(pollStatus);
-            } else {
-              console.log(`Current status: ${statusData.status}`);
             }
-          } catch (error) {
-            console.error('Error polling status:', error);
-          }
+          } catch { /* continue polling */ }
         }, 3000);
-        
-        // Stop polling after 2 minutes
+
         setTimeout(() => {
-          console.log('Polling timeout reached');
           clearInterval(pollStatus);
           if (connectionStatus === "connecting") {
             setConnectionStatus("error");
           }
         }, 120000);
       }
-    } catch (error) {
-      console.error('Error connecting WhatsApp:', error);
+    } catch {
       setConnectionStatus("error");
     } finally {
       setIsConnecting(false);
     }
   };
-  
+
   const handleDisconnect = async () => {
     try {
-      await fetch(`/api/whatsapp/disconnect/${instanceName}`, {
-        method: 'POST',
-      });
+      await fetch(`/api/whatsapp/disconnect/${instanceName}`, { method: 'POST' });
       setConnectionStatus("disconnected");
       setQrCode(null);
     } catch (error) {
@@ -160,18 +112,13 @@ export default function WhatsAppSettings() {
 
   const handleConfigureWebhook = async () => {
     try {
-      console.log('Configuring webhook for:', instanceName);
-      const response = await fetch(`/api/whatsapp/configure-webhook/${instanceName}`, {
-        method: 'POST',
-      });
-      
+      const response = await fetch(`/api/whatsapp/configure-webhook/${instanceName}`, { method: 'POST' });
       if (response.ok) {
         alert('Webhook configurado com sucesso!');
       } else {
         alert('Erro ao configurar webhook');
       }
-    } catch (error) {
-      console.error('Error configuring webhook:', error);
+    } catch {
       alert('Erro ao configurar webhook');
     }
   };
@@ -209,21 +156,21 @@ export default function WhatsAppSettings() {
               )}
               <div>
                 <p className="font-medium">
-                  {connectionStatus === "connected" 
-                    ? "Conectado" 
-                    : connectionStatus === "connecting" 
-                    ? "Conectando..." 
-                    : connectionStatus === "error" 
-                    ? "Erro na conexão" 
+                  {connectionStatus === "connected"
+                    ? "Conectado"
+                    : connectionStatus === "connecting"
+                    ? "Conectando..."
+                    : connectionStatus === "error"
+                    ? "Erro na conexão"
                     : "Desconectado"}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {connectionStatus === "connected" 
-                    ? "Sua conta do WhatsApp está conectada" 
-                    : connectionStatus === "connecting" 
-                    ? "Aguardando autenticação..." 
-                    : connectionStatus === "error" 
-                    ? "Falha ao conectar. Tente novamente." 
+                  {connectionStatus === "connected"
+                    ? "Sua conta do WhatsApp está conectada"
+                    : connectionStatus === "connecting"
+                    ? "Aguardando autenticação..."
+                    : connectionStatus === "error"
+                    ? "Falha ao conectar. Tente novamente."
                     : "Nenhuma conta conectada"}
                 </p>
               </div>
@@ -259,12 +206,7 @@ export default function WhatsAppSettings() {
                 Escaneie o QR Code abaixo com o WhatsApp do seu celular
               </p>
               <div className="p-4 bg-white rounded-lg">
-                {/* In a real implementation, this would be the actual QR code from Evolution API */}
-                <img 
-                  src={qrCode} 
-                  alt="QR Code para conexão do WhatsApp" 
-                  className="w-48 h-48"
-                />
+                <img src={qrCode} alt="QR Code para conexão do WhatsApp" className="w-48 h-48" />
               </div>
               <p className="text-xs text-muted-foreground text-center">
                 O QR Code expira em 2 minutos. Se expirar, clique em "Conectar WhatsApp" novamente.
@@ -278,27 +220,21 @@ export default function WhatsAppSettings() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>Receber Mensagens</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Processar mensagens recebidas automaticamente
-                  </p>
+                  <p className="text-sm text-muted-foreground">Processar mensagens recebidas automaticamente</p>
                 </div>
                 <Switch defaultChecked />
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>Enviar Mensagens</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Permitir envio de mensagens através do agente
-                  </p>
+                  <p className="text-sm text-muted-foreground">Permitir envio de mensagens através do agente</p>
                 </div>
                 <Switch defaultChecked />
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>Sincronizar Contatos</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Importar contatos do WhatsApp periodicamente
-                  </p>
+                  <p className="text-sm text-muted-foreground">Importar contatos do WhatsApp periodicamente</p>
                 </div>
                 <Switch defaultChecked />
               </div>
@@ -310,34 +246,20 @@ export default function WhatsAppSettings() {
       <Card className="glass">
         <CardHeader>
           <CardTitle>Evolution API</CardTitle>
-          <CardDescription>
-            Configurações da API de integração com o WhatsApp
-          </CardDescription>
+          <CardDescription>Configurações da API de integração com o WhatsApp</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="baseUrl">URL Base da API</Label>
-            <Input 
-              id="baseUrl" 
-              defaultValue="https://evolutionapi.centralsupernova.com.br" 
-              placeholder="https://evolutionapi.centralsupernova.com.br"
-            />
+            <Input id="baseUrl" defaultValue="https://evolutionapi.centralsupernova.com.br" placeholder="https://evolutionapi.centralsupernova.com.br" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="apiKey">Chave da API</Label>
-            <Input 
-              id="apiKey" 
-              type="password" 
-              placeholder="Sua chave da API"
-            />
+            <Input id="apiKey" type="password" placeholder="Sua chave da API" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="instanceId">ID da Instância</Label>
-            <Input 
-              id="instanceId" 
-              defaultValue="wa-0001" 
-              placeholder="ID da instância"
-            />
+            <Input id="instanceId" defaultValue="wa-0001" placeholder="ID da instância" />
           </div>
           <Button>Salvar Configurações</Button>
         </CardContent>
