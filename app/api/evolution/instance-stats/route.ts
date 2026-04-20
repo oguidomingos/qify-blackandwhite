@@ -1,43 +1,59 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { fetchQuery } from "convex/nextjs";
-import { api } from "@/convex/_generated/api";
+import { getOrgInstance } from "@/lib/get-org-instance";
+import { evolutionGet, evolutionPost, encodeInstance } from "@/lib/evolution-api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { orgId, userId } = auth();
+    const { instanceName, error } = await getOrgInstance();
 
-    if (!orgId && !userId) {
+    if (error === "Unauthorized") {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const organization = await fetchQuery(api.organizations.getViewerOrganization, {
-      clerkOrgId: orgId || undefined,
-      userId: userId || undefined,
-    });
-
-    if (!organization) {
+    if (!instanceName) {
       return NextResponse.json({
         totalMessages: 0,
         totalContacts: 0,
         totalChats: 0,
-        instanceStatus: "disconnected",
+        instanceStatus: "not_configured",
         instanceName: "N/A",
         phoneNumber: "N/A",
         profileName: "N/A",
         lastUpdate: new Date().toISOString(),
         fallback: false,
-        message: "Organization not found",
+        message: "No instance selected. Go to Settings → WhatsApp to select one.",
       });
     }
 
-    const stats = await fetchQuery(api.metrics.getInstanceStats, {
-      orgId: organization._id,
-    });
+    const enc = encodeInstance(instanceName);
 
-    return NextResponse.json(stats);
+    // Get instance info (status + counts) from fetchInstances
+    const [instances, chats] = await Promise.all([
+      evolutionGet("/instance/fetchInstances").catch(() => []),
+      evolutionPost(`/chat/findChats/${enc}`, { where: {} }).catch(() => []),
+    ]);
+
+    const inst = Array.isArray(instances)
+      ? instances.find((i: any) => i.name === instanceName)
+      : null;
+
+    const chatCount = Array.isArray(chats) ? chats.length : 0;
+    const msgCount = inst?._count?.Message || 0;
+    const contactCount = inst?._count?.Contact || 0;
+
+    return NextResponse.json({
+      totalMessages: msgCount,
+      totalContacts: contactCount,
+      totalChats: chatCount,
+      instanceStatus: inst?.connectionStatus === "open" ? "connected" : (inst?.connectionStatus || "unknown"),
+      instanceName: inst?.name || instanceName,
+      phoneNumber: inst?.number || inst?.ownerJid?.split("@")[0] || "N/A",
+      profileName: inst?.profileName || inst?.name || "N/A",
+      lastUpdate: new Date().toISOString(),
+      fallback: false,
+    });
   } catch (error) {
     console.error("Instance stats error:", error);
     return NextResponse.json({

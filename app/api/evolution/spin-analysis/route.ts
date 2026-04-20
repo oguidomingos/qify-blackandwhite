@@ -1,97 +1,83 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { fetchQuery } from "convex/nextjs";
-import { api } from "@/convex/_generated/api";
+import { getOrgInstance } from "@/lib/get-org-instance";
+import { evolutionPost, encodeInstance } from "@/lib/evolution-api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const { orgId, userId } = auth();
-    if (!orgId && !userId) {
+    const { instanceName, error } = await getOrgInstance();
+
+    if (error === "Unauthorized") {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
-    const { searchParams } = new URL(request.url);
-    const contactId = searchParams.get("contactId");
-    const period = searchParams.get("period") || "week";
-
-    const organization = await fetchQuery(api.organizations.getViewerOrganization, {
-      clerkOrgId: orgId || undefined,
-      userId: userId || undefined,
-    });
-
-    if (!organization) {
-      return NextResponse.json({ success: false, sessions: [], statistics: { totalSessions: 0, qualified: 0, stageDistribution: { S: 0, P: 0, I: 0, N: 0 }, averageScore: 0 }, period, fallback: false }, { status: 404 });
-    }
-
-    const sessions = await fetchQuery(api.sessions.listSpin, { orgId: organization._id });
-    const filtered = contactId
-      ? sessions.filter((session) => session.externalId === contactId)
-      : sessions;
-
-    const normalizeStage = (stage?: string | null) => {
-      switch (stage) {
-        case "problem":
-          return "P";
-        case "implication":
-          return "I";
-        case "needPayoff":
-        case "need":
-          return "N";
-        case "situation":
-        default:
-          return "S";
-      }
+    const empty = {
+      success: true,
+      sessions: [],
+      statistics: { totalSessions: 0, qualified: 0, stageDistribution: { S: 0, P: 0, I: 0, N: 0 }, averageScore: 0 },
+      period: "all",
+      fallback: false,
     };
 
-    const normalizedSessions = filtered.map((session) => ({
-      contactId: session.externalId || String(session.contactId),
-      contactName: session.contactName,
-      currentStage: normalizeStage(session.spinStage),
-      score: session.score,
-      stageProgression: [],
-      lastActivity: session.lastActivityAt,
-      totalMessages: 0,
-      qualified: session.qualified,
-      summary: session.summary || "",
-    }));
+    if (!instanceName) return NextResponse.json({ ...empty, message: "No instance selected" });
 
-    if (contactId) {
-      return NextResponse.json({ success: true, session: normalizedSessions[0] || null, contactId });
-    }
+    // Build SPIN sessions from chats (each chat = a potential lead)
+    const raw: any[] = await evolutionPost(`/chat/findChats/${encodeInstance(instanceName)}`, {
+      where: {},
+    }).catch(() => []);
+
+    const chats = Array.isArray(raw) ? raw : [];
+
+    // Only individual chats (not groups) are leads
+    const leads = chats.filter((c: any) => !c.remoteJid?.endsWith("@g.us"));
+
+    const sessions = leads.map((chat: any) => {
+      const ts = new Date(chat.updatedAt || 0).getTime();
+      const name = chat.pushName || chat.remoteJid?.split("@")[0] || "Desconhecido";
+      const unread = chat.unreadCount || 0;
+
+      // Basic heuristic: window active = advanced, unread = situation stage
+      const currentStage = chat.windowActive ? "P" : "S";
+      const score = chat.windowActive ? 30 : 10;
+
+      return {
+        contactId: chat.remoteJid,
+        contactName: name,
+        currentStage,
+        score,
+        qualified: false,
+        summary: "",
+        lastActivity: ts,
+      };
+    });
+
+    sessions.sort((a, b) => b.lastActivity - a.lastActivity);
 
     const statistics = {
-      totalSessions: normalizedSessions.length,
-      qualified: normalizedSessions.filter((session) => session.qualified).length,
+      totalSessions: sessions.length,
+      qualified: sessions.filter((s: any) => s.qualified).length,
       stageDistribution: {
-        S: normalizedSessions.filter((session) => session.currentStage === "S").length,
-        P: normalizedSessions.filter((session) => session.currentStage === "P").length,
-        I: normalizedSessions.filter((session) => session.currentStage === "I").length,
-        N: normalizedSessions.filter((session) => session.currentStage === "N").length,
+        S: sessions.filter((s: any) => s.currentStage === "S").length,
+        P: sessions.filter((s: any) => s.currentStage === "P").length,
+        I: sessions.filter((s: any) => s.currentStage === "I").length,
+        N: sessions.filter((s: any) => s.currentStage === "N").length,
       },
-      averageScore: normalizedSessions.length > 0
-        ? Math.round(normalizedSessions.reduce((sum, session) => sum + session.score, 0) / normalizedSessions.length)
+      averageScore: sessions.length > 0
+        ? Math.round(sessions.reduce((s: number, sess: any) => s + sess.score, 0) / sessions.length)
         : 0,
     };
 
-    return NextResponse.json({
-      success: true,
-      sessions: normalizedSessions,
-      statistics,
-      period,
-      fallback: false,
-    });
+    return NextResponse.json({ success: true, sessions, statistics, period: "all", fallback: false });
   } catch (error) {
     console.error("SPIN analysis route error:", error);
     return NextResponse.json({
       success: false,
       sessions: [],
       statistics: { totalSessions: 0, qualified: 0, stageDistribution: { S: 0, P: 0, I: 0, N: 0 }, averageScore: 0 },
-      period: "week",
+      period: "all",
       fallback: false,
       error: error instanceof Error ? error.message : "Unknown error",
-      message: "Erro crítico na análise SPIN",
     }, { status: 500 });
   }
 }

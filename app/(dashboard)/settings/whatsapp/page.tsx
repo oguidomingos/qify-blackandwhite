@@ -14,8 +14,10 @@ import {
   Users,
   MessageSquare,
   Loader2,
+  Save,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 
 interface EvolutionInstance {
   id: string;
@@ -55,6 +57,8 @@ export default function WhatsAppSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedInstance, setSelectedInstance] = useState<string | null>(null);
+  const [savedInstance, setSavedInstance] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrInstance, setQrInstance] = useState<string | null>(null);
@@ -63,10 +67,20 @@ export default function WhatsAppSettings() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/evolution/instances");
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setInstances(data.instances || []);
+      const [instRes, savedRes] = await Promise.all([
+        fetch("/api/evolution/instances"),
+        fetch("/api/evolution/save-instance"),
+      ]);
+      const instData = await instRes.json();
+      const savedData = await savedRes.json();
+
+      if (instData.error) throw new Error(instData.error);
+      setInstances(instData.instances || []);
+
+      if (savedData.instanceName) {
+        setSavedInstance(savedData.instanceName);
+        setSelectedInstance(savedData.instanceName);
+      }
     } catch (err: any) {
       setError(err.message || "Erro ao carregar instâncias");
     } finally {
@@ -74,9 +88,32 @@ export default function WhatsAppSettings() {
     }
   };
 
-  useEffect(() => {
-    loadInstances();
-  }, []);
+  useEffect(() => { loadInstances(); }, []);
+
+  const handleSave = async () => {
+    if (!selectedInstance) return;
+    setSaving(true);
+    try {
+      const inst = instances.find(i => i.name === selectedInstance);
+      const res = await fetch("/api/evolution/save-instance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instanceName: selectedInstance,
+          phoneNumber: inst?.phoneNumber || "",
+          profileName: inst?.profileName || "",
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setSavedInstance(selectedInstance);
+      toast.success(`Instância "${selectedInstance}" salva com sucesso!`);
+    } catch (err: any) {
+      toast.error(`Erro ao salvar: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleConnect = async (instanceName: string) => {
     setConnecting(instanceName);
@@ -92,18 +129,15 @@ export default function WhatsAppSettings() {
       if (data.qrCode) {
         setQrCode(data.qrCode);
         setQrInstance(instanceName);
-
-        // Poll status
         const poll = setInterval(async () => {
           await loadInstances();
-          const inst = instances.find((i) => i.name === instanceName);
+          const inst = instances.find(i => i.name === instanceName);
           if (inst?.connectionStatus === "open") {
             clearInterval(poll);
             setQrCode(null);
             setQrInstance(null);
           }
         }, 3000);
-
         setTimeout(() => clearInterval(poll), 120000);
       }
     } catch (err: any) {
@@ -122,9 +156,7 @@ export default function WhatsAppSettings() {
     }
   };
 
-  const handleSelect = (instanceName: string) => {
-    setSelectedInstance(instanceName === selectedInstance ? null : instanceName);
-  };
+  const hasUnsavedChanges = selectedInstance !== savedInstance;
 
   return (
     <div className="space-y-6">
@@ -135,6 +167,16 @@ export default function WhatsAppSettings() {
         </p>
       </div>
 
+      {/* Saved instance banner */}
+      {savedInstance && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/30">
+          <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />
+          <span className="text-sm text-green-400">
+            Instância ativa: <strong>{savedInstance}</strong>
+          </span>
+        </div>
+      )}
+
       <Card className="glass">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -143,13 +185,21 @@ export default function WhatsAppSettings() {
               Instâncias Disponíveis
             </CardTitle>
             <CardDescription>
-              Escolha qual instância do WhatsApp usar para este agente
+              Clique para selecionar e depois clique em Salvar
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={loadInstances} disabled={isLoading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={loadInstances} disabled={isLoading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+              Atualizar
+            </Button>
+            {selectedInstance && hasUnsavedChanges && (
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                Salvar
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading && (
@@ -163,9 +213,7 @@ export default function WhatsAppSettings() {
             <div className="flex flex-col items-center py-8 gap-3 text-center">
               <AlertCircle className="h-8 w-8 text-red-500" />
               <p className="text-sm text-red-500">{error}</p>
-              <Button variant="outline" size="sm" onClick={loadInstances}>
-                Tentar novamente
-              </Button>
+              <Button variant="outline" size="sm" onClick={loadInstances}>Tentar novamente</Button>
             </div>
           )}
 
@@ -180,6 +228,7 @@ export default function WhatsAppSettings() {
             <div className="space-y-3">
               {instances.map((inst) => {
                 const isSelected = selectedInstance === inst.name;
+                const isSaved = savedInstance === inst.name;
                 const isConnected = inst.connectionStatus === "open";
 
                 return (
@@ -190,10 +239,9 @@ export default function WhatsAppSettings() {
                         ? "border-primary bg-primary/5"
                         : "border-border/40 bg-slate-800/30 hover:border-border hover:bg-slate-800/50"
                     }`}
-                    onClick={() => handleSelect(inst.name)}
+                    onClick={() => setSelectedInstance(inst.name === selectedInstance ? null : inst.name)}
                   >
                     <div className="flex items-center justify-between gap-4">
-                      {/* Avatar + Info */}
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="relative flex-shrink-0">
                           {inst.profilePicUrl ? (
@@ -201,20 +249,14 @@ export default function WhatsAppSettings() {
                               src={inst.profilePicUrl}
                               alt={inst.profileName || inst.name}
                               className="w-12 h-12 rounded-full object-cover"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = "none";
-                              }}
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                             />
                           ) : (
                             <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
                               <MessageCircle className="w-6 h-6 text-primary" />
                             </div>
                           )}
-                          <div
-                            className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
-                              isConnected ? "bg-green-500" : "bg-slate-500"
-                            }`}
-                          />
+                          <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${isConnected ? "bg-green-500" : "bg-slate-500"}`} />
                         </div>
 
                         <div className="flex-1 min-w-0">
@@ -222,6 +264,11 @@ export default function WhatsAppSettings() {
                             <span className="font-semibold text-foreground">{inst.profileName || inst.name}</span>
                             {inst.profileName && (
                               <span className="text-xs text-muted-foreground font-mono">({inst.name})</span>
+                            )}
+                            {isSaved && (
+                              <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
+                                Ativa
+                              </Badge>
                             )}
                           </div>
                           {inst.phoneNumber && (
@@ -240,10 +287,8 @@ export default function WhatsAppSettings() {
                         </div>
                       </div>
 
-                      {/* Status + Actions */}
                       <div className="flex flex-col items-end gap-2 flex-shrink-0">
                         <StatusBadge status={inst.connectionStatus} />
-
                         {isSelected && (
                           <div className="flex gap-2">
                             {isConnected ? (
@@ -253,8 +298,7 @@ export default function WhatsAppSettings() {
                                 className="text-red-400 border-red-500/30 hover:bg-red-500/10"
                                 onClick={(e) => { e.stopPropagation(); handleDisconnect(inst.name); }}
                               >
-                                <WifiOff className="h-3 w-3 mr-1" />
-                                Desconectar
+                                <WifiOff className="h-3 w-3 mr-1" /> Desconectar
                               </Button>
                             ) : (
                               <Button
@@ -262,11 +306,9 @@ export default function WhatsAppSettings() {
                                 onClick={(e) => { e.stopPropagation(); handleConnect(inst.name); }}
                                 disabled={connecting === inst.name}
                               >
-                                {connecting === inst.name ? (
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                ) : (
-                                  <Wifi className="h-3 w-3 mr-1" />
-                                )}
+                                {connecting === inst.name
+                                  ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  : <Wifi className="h-3 w-3 mr-1" />}
                                 Conectar
                               </Button>
                             )}
@@ -275,15 +317,12 @@ export default function WhatsAppSettings() {
                       </div>
                     </div>
 
-                    {/* QR Code */}
                     {qrInstance === inst.name && qrCode && (
                       <div
                         className="mt-4 flex flex-col items-center gap-3 pt-4 border-t border-border/30"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <p className="text-sm text-muted-foreground">
-                          Escaneie o QR Code com o WhatsApp
-                        </p>
+                        <p className="text-sm text-muted-foreground">Escaneie o QR Code com o WhatsApp</p>
                         <div className="p-3 bg-white rounded-lg">
                           <img src={qrCode} alt="QR Code" className="w-48 h-48" />
                         </div>
@@ -295,10 +334,22 @@ export default function WhatsAppSettings() {
               })}
             </div>
           )}
+
+          {/* Floating save button */}
+          {selectedInstance && hasUnsavedChanges && !isLoading && (
+            <div className="mt-4 flex items-center justify-between p-3 rounded-lg bg-primary/10 border border-primary/30">
+              <span className="text-sm text-primary">
+                Instância selecionada: <strong>{selectedInstance}</strong>
+              </span>
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                {saving ? "Salvando..." : "Salvar e aplicar"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Summary */}
       {!isLoading && instances.length > 0 && (
         <div className="grid grid-cols-3 gap-4">
           <Card className="glass">
@@ -310,7 +361,7 @@ export default function WhatsAppSettings() {
           <Card className="glass">
             <CardContent className="pt-6">
               <div className="text-2xl font-bold text-green-400">
-                {instances.filter((i) => i.connectionStatus === "open").length}
+                {instances.filter(i => i.connectionStatus === "open").length}
               </div>
               <p className="text-xs text-muted-foreground mt-1">Conectadas</p>
             </CardContent>
@@ -318,7 +369,7 @@ export default function WhatsAppSettings() {
           <Card className="glass">
             <CardContent className="pt-6">
               <div className="text-2xl font-bold text-foreground">
-                {instances.reduce((sum, i) => sum + i.contactCount, 0).toLocaleString()}
+                {instances.reduce((s, i) => s + i.contactCount, 0).toLocaleString()}
               </div>
               <p className="text-xs text-muted-foreground mt-1">Contatos totais</p>
             </CardContent>
