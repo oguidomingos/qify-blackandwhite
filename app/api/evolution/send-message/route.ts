@@ -1,99 +1,97 @@
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { fetchQuery, fetchMutation } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
 
-export const dynamic = 'force-dynamic';
-
-const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL;
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
-const INSTANCE_NAME = process.env.EVOLUTION_INSTANCE_NAME || "oguidomingos";
+export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    const { orgId, userId } = auth();
+    if (!orgId && !userId) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+
     const { contactId, message } = await request.json();
-
     if (!contactId || !message) {
-      return NextResponse.json({
-        success: false,
-        error: "contactId and message are required"
-      }, { status: 400 });
+      return NextResponse.json({ success: false, error: "contactId and message are required" }, { status: 400 });
     }
 
-    console.log(`📤 Sending message to ${contactId}...`);
+    const organization = await fetchQuery(api.organizations.getViewerOrganization, {
+      clerkOrgId: orgId || undefined,
+      userId: userId || undefined,
+    });
 
-    // Try multiple send message endpoints
-    const sendEndpoints = [
-      {
-        url: `/message/sendText/${INSTANCE_NAME}`,
-        method: 'POST',
-        body: {
-          number: contactId,
-          text: message
-        }
-      },
-      {
-        url: `/message/sendText/${INSTANCE_NAME}`,
-        method: 'POST',
-        body: {
-          number: contactId.split('@')[0],
-          textMessage: {
-            text: message
-          }
-        }
-      },
-      {
-        url: `/send/text/${INSTANCE_NAME}`,
-        method: 'POST',
-        body: {
-          number: contactId,
-          message: message
-        }
-      }
-    ];
-
-    let sendResponse: Response | null = null;
-    let lastError: Error | null = null;
-
-    for (const endpoint of sendEndpoints) {
-      try {
-        console.log(`🔍 Trying send endpoint: ${endpoint.url}`);
-
-        sendResponse = await fetch(`${EVOLUTION_BASE_URL}${endpoint.url}`, {
-          method: endpoint.method,
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': EVOLUTION_API_KEY!
-          },
-          body: JSON.stringify(endpoint.body)
-        });
-
-        if (sendResponse.ok) {
-          console.log(`✅ Message sent via: ${endpoint.url}`);
-          const data = await sendResponse.json();
-
-          return NextResponse.json({
-            success: true,
-            message: "Mensagem enviada com sucesso",
-            data: data,
-            endpoint: endpoint.url
-          });
-        } else {
-          const errorText = await sendResponse.text();
-          console.log(`❌ Endpoint ${endpoint.url} failed: ${sendResponse.status} - ${errorText}`);
-          lastError = new Error(`${endpoint.url}: ${sendResponse.status}`);
-        }
-      } catch (error) {
-        console.error(`🚨 Error with endpoint ${endpoint.url}:`, error);
-        lastError = error instanceof Error ? error : new Error(`Failed: ${endpoint.url}`);
-      }
+    if (!organization) {
+      return NextResponse.json({ success: false, error: "Organization not found" }, { status: 404 });
     }
 
-    throw lastError || new Error('All send message endpoints failed');
+    const account = await fetchQuery(api.wa.getByViewer, {
+      clerkOrgId: orgId || undefined,
+      userId: userId || undefined,
+    });
 
+    const contact = await fetchQuery(api.contacts.getByExternalId, {
+      externalId: contactId,
+      orgId: organization._id,
+    });
+
+    if (!account || !contact) {
+      return NextResponse.json({ success: false, error: "WhatsApp account or contact not found" }, { status: 404 });
+    }
+
+    const session = await fetchQuery(api.sessions.getActiveByContact, {
+      contactId: contact._id,
+    });
+
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Conversation not found" }, { status: 404 });
+    }
+
+    const payload = {
+      number: contactId,
+      text: message,
+    };
+
+    const response = await fetch(`${account.baseUrl}/message/sendText/${account.instanceId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: account.token,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`WhatsApp API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    await fetchMutation(api.messages.create, {
+      sessionId: session._id,
+      contactId: contact._id,
+      orgId: organization._id,
+      direction: "outbound",
+      text: message,
+      metadata: {
+        whatsappId: data?.key?.id,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Mensagem enviada com sucesso",
+      data,
+      endpoint: `${account.instanceId}`,
+    });
   } catch (error) {
     console.error("Send message error:", error);
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
-      message: "Falha ao enviar mensagem"
+      message: "Falha ao enviar mensagem",
     }, { status: 500 });
   }
 }

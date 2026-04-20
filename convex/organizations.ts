@@ -55,33 +55,56 @@ export const getById = internalQuery({
   },
 });
 
-export const getByInstanceName = query({
-  args: { instanceName: v.string() },
-  handler: async (ctx, { instanceName }) => {
-    // For now, we'll find organization by matching the instance name pattern
-    // instanceName format: qify-{phoneNumber}
-    const phoneNumber = instanceName.replace('qify-', '');
-    
-    console.log('Looking for phone number:', phoneNumber);
-    
-    // Try to find organization by phone number in agent configurations
-    const agentConfigs = await ctx.db
-      .query("agent_configurations")
-      .collect();
-    
-    console.log('Found agent configs:', agentConfigs.length);
-    
-    for (const config of agentConfigs) {
-      const configPhone = config.phoneNumber?.replace(/[^\d]/g, '');
-      console.log(`Comparing ${configPhone} with ${phoneNumber}`);
-      
-      if (configPhone === phoneNumber) {
-        console.log('Found matching config, getting org:', config.orgId);
-        const org = await ctx.db.get(config.orgId);
+export const getViewerOrganization = query({
+  args: {
+    clerkOrgId: v.optional(v.string()),
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx, { clerkOrgId, userId }) => {
+    if (clerkOrgId) {
+      const org = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+        .first();
+
+      if (org) {
         return org;
       }
     }
-    
+
+    if (userId) {
+      return await ctx.db
+        .query("organizations")
+        .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", userId))
+        .first();
+    }
+
+    return null;
+  },
+});
+
+export const getByInstanceName = query({
+  args: { instanceName: v.string() },
+  handler: async (ctx, { instanceName }) => {
+    const account = await ctx.db
+      .query("whatsapp_accounts")
+      .withIndex("by_instance_name", (q: any) => q.eq("instanceName", instanceName))
+      .first();
+
+    if (account) {
+      return await ctx.db.get(account.orgId);
+    }
+
+    const phoneNumber = instanceName.replace("qify-", "");
+    const agentConfigs = await ctx.db.query("agent_configurations").collect();
+
+    for (const config of agentConfigs) {
+      const configPhone = config.phoneNumber?.replace(/[^\d]/g, "");
+      if (configPhone === phoneNumber) {
+        return await ctx.db.get(config.orgId);
+      }
+    }
+
     return null;
   },
 });

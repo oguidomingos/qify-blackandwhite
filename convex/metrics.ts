@@ -128,6 +128,42 @@ export const getDashboardOverview = query({
   },
 });
 
+export const getInstanceStats = query({
+  args: { orgId: v.id("organizations") },
+  handler: async (ctx, { orgId }) => {
+    const [account, contacts, sessions, messages] = await Promise.all([
+      ctx.db
+        .query("whatsapp_accounts")
+        .withIndex("by_org", (q) => q.eq("orgId", orgId))
+        .first(),
+      ctx.db
+        .query("contacts")
+        .withIndex("by_org_last", (q) => q.eq("orgId", orgId))
+        .collect(),
+      ctx.db
+        .query("sessions")
+        .withIndex("by_org_last", (q) => q.eq("orgId", orgId))
+        .collect(),
+      ctx.db
+        .query("messages")
+        .withIndex("by_org_time", (q) => q.eq("orgId", orgId))
+        .collect(),
+    ]);
+
+    return {
+      totalMessages: messages.length,
+      totalContacts: contacts.length,
+      totalChats: sessions.length,
+      instanceStatus: account?.status || "disconnected",
+      instanceName: account?.instanceName || account?.instanceId || "N/A",
+      phoneNumber: account?.phoneNumber || "N/A",
+      profileName: account?.instanceName || account?.phoneNumber || "N/A",
+      lastUpdate: new Date().toISOString(),
+      fallback: false,
+    };
+  },
+});
+
 export const getMessageStats = query({
   args: { 
     orgId: v.id("organizations"),

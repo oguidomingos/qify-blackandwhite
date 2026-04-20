@@ -9,6 +9,10 @@ const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 async function processWhatsAppMessage(instanceName: string, messageData: any) {
   try {
     const { key, message, pushName, messageTimestamp } = messageData;
+    if (key?.fromMe) {
+      return { skipped: true, reason: "outbound_message" };
+    }
+
     const phoneNumber = key.remoteJid.replace('@s.whatsapp.net', '');
     const messageText = message.conversation || message.text || '';
     
@@ -218,12 +222,29 @@ export async function POST(
       
       case "connection.update":
         console.log(`Connection update for instance ${instanceName}:`, payload.data);
-        // TODO: Update instance status in Convex
+        await convex.mutation(api.wa.updateStatus, {
+          instanceId: instanceName,
+          status: payload.data?.state === "open" ? "connected" : (payload.data?.state || "disconnected"),
+        });
         break;
       
       case "qrcode.updated":
         console.log(`QR Code updated for instance ${instanceName}:`, payload.data);
-        // TODO: Update QR code in Convex
+        try {
+          const account = await convex.query(api.wa.getByInstance, { instanceName });
+          const qrCode = payload.data?.qrcode?.base64 || payload.data?.base64 || payload.data?.qr || payload.data?.qrcode;
+
+          if (account && qrCode) {
+            await convex.mutation(api.wa.updateQrCode, {
+              accountId: account._id,
+              qrCode,
+              lastQrAt: Date.now(),
+              status: "qr_pending",
+            });
+          }
+        } catch (error) {
+          console.error("Error updating QR code in Convex:", error);
+        }
         break;
       
       default:

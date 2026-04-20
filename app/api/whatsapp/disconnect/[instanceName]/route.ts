@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchQuery, fetchMutation } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
 
-// API key protegida
-const EVOLUTION_API_KEY = "509dbd54-c20c-4a5b-b889-a0494a861f5a";
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN;
+const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL;
 
 export async function POST(
   request: NextRequest,
@@ -17,8 +19,13 @@ export async function POST(
       );
     }
 
-    // Logout from WhatsApp instance
-    const logoutResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/logout/${instanceName}`, {
+    if (!EVOLUTION_API_KEY || !EVOLUTION_BASE_URL) {
+      throw new Error("Evolution API credentials not configured");
+    }
+
+    const account = await fetchQuery(api.wa.getByInstance, { instanceName });
+
+    const logoutResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/logout/${instanceName}`, {
       method: 'DELETE',
       headers: {
         'apikey': EVOLUTION_API_KEY,
@@ -30,7 +37,7 @@ export async function POST(
     }
 
     // Delete WhatsApp instance
-    const deleteResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/delete/${instanceName}`, {
+    const deleteResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/delete/${instanceName}`, {
       method: 'DELETE',
       headers: {
         'apikey': EVOLUTION_API_KEY,
@@ -39,6 +46,19 @@ export async function POST(
 
     if (!deleteResponse.ok) {
       throw new Error(`Evolution API error: ${deleteResponse.statusText}`);
+    }
+
+    if (account) {
+      await fetchMutation(api.wa.upsertAccount, {
+        orgId: account.orgId,
+        instanceId: account.instanceId,
+        instanceName: account.instanceName || instanceName,
+        phoneNumber: account.phoneNumber,
+        status: "disconnected",
+        baseUrl: account.baseUrl,
+        token: account.token,
+        sharedToken: account.sharedToken,
+      });
     }
 
     return NextResponse.json({

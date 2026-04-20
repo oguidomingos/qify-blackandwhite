@@ -9,13 +9,16 @@ export const getById = internalQuery({
 });
 
 export const listByOrg = query({
-  args: { orgId: v.id("organizations") },
-  handler: async (ctx: any, { orgId }: any) => {
+  args: { 
+    orgId: v.id("organizations"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx: any, { orgId, limit = 50 }: any) => {
     return await ctx.db
       .query("contacts")
       .withIndex("by_org_last", (q: any) => q.eq("orgId", orgId))
       .order("desc")
-      .take(50);
+      .take(limit);
   },
 });
 

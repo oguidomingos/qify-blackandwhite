@@ -214,11 +214,15 @@ export const listSpin = query({
       .collect();
 
     // Only return sessions with SPIN data
-    return sessions
+    const spinSessions = sessions
       .filter(session => session.variables.spin)
-      .map(session => ({
+      .map(async session => {
+        const contact = await ctx.db.get(session.contactId);
+        return {
         id: session._id,
         contactId: session.contactId,
+        contactName: contact?.name || contact?.externalId?.split("@")[0] || "Contato",
+        externalId: contact?.externalId || null,
         status: session.status,
         stage: session.stage,
         spinStage: session.variables.spin?.stage,
@@ -227,8 +231,77 @@ export const listSpin = query({
         lastActivityAt: session.lastActivityAt,
         createdAt: session.createdAt,
         summary: session.variables.spin?.summary,
-      }))
+        };
+      });
+
+    return (await Promise.all(spinSessions))
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  },
+});
+
+export const getInboxChats = query({
+  args: {
+    orgId: v.id("organizations"),
+    chatType: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { orgId, chatType = "all", limit = 50 }) => {
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_org_last", (q: any) => q.eq("orgId", orgId))
+      .order("desc")
+      .take(limit);
+
+    const chats = [];
+
+    for (const session of sessions) {
+      const contact = await ctx.db.get(session.contactId);
+      if (!contact) continue;
+
+      const isGroup = contact.externalId.endsWith("@g.us");
+      if (chatType === "individual" && isGroup) continue;
+      if (chatType === "group" && !isGroup) continue;
+
+      const recentMessages = await ctx.db
+        .query("messages")
+        .withIndex("by_session_time", (q: any) => q.eq("sessionId", session._id))
+        .order("desc")
+        .take(10);
+
+      const lastMessage = recentMessages[0];
+      if (!lastMessage) continue;
+
+      const unreadCount = recentMessages.filter((message: any) => message.direction === "inbound").length;
+
+      chats.push({
+        _id: session._id,
+        contactId: contact.externalId,
+        contactName: contact.name || contact.externalId.split("@")[0],
+        unreadCount,
+        lastMessage: {
+          text: lastMessage.text,
+          timestamp: lastMessage.createdAt,
+          direction: lastMessage.direction,
+        },
+        isActive: session.status === "active",
+        lastActivityAt: session.lastActivityAt,
+        isGroup,
+      });
+    }
+
+    const stats = {
+      total: chats.length,
+      active: chats.filter(chat => chat.isActive).length,
+      unread: chats.filter(chat => chat.unreadCount > 0).length,
+      totalUnreadMessages: chats.reduce((total, chat) => total + chat.unreadCount, 0),
+      groups: chats.filter(chat => chat.isGroup).length,
+      individuals: chats.filter(chat => !chat.isGroup).length,
+    };
+
+    return {
+      chats,
+      statistics: stats,
+    };
   },
 });
 

@@ -235,6 +235,46 @@ export const getByInstance = query({
   },
 });
 
+export const getByViewer = query({
+  args: {
+    clerkOrgId: v.optional(v.string()),
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx: any, { clerkOrgId, userId }: any) => {
+    let organization = null;
+
+    if (clerkOrgId) {
+      organization = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+        .first();
+    }
+
+    if (!organization && userId) {
+      organization = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", userId))
+        .first();
+    }
+
+    if (!organization) {
+      return null;
+    }
+
+    const account = await ctx.db
+      .query("whatsapp_accounts")
+      .withIndex("by_org", (q: any) => q.eq("orgId", organization._id))
+      .first();
+
+    return account
+      ? {
+          ...account,
+          org: organization,
+        }
+      : null;
+  },
+});
+
 export const getByInstanceInternal = internalQuery({
   args: { instanceName: v.string() },
   handler: async (ctx: any, { instanceName }: any) => {
@@ -333,10 +373,58 @@ export const createAccount = mutation({
       lastWebhookTestAt: undefined, // NEW: Will be set when webhook is tested
       webhookVerified: false, // NEW: Initially not verified
       webhookSecret: "",
-      sharedToken: token || process.env.EVOLUTION_API_TOKEN || "",
-      baseUrl: baseUrl || process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
-      token: token || process.env.EVOLUTION_API_TOKEN || "",
+      sharedToken: token || process.env.EVOLUTION_SHARED_TOKEN || process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
+      baseUrl: baseUrl || process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+      token: token || process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
       createdAt: Date.now(),
+    });
+  },
+});
+
+export const upsertAccount = mutation({
+  args: {
+    orgId: v.id("organizations"),
+    instanceId: v.string(),
+    instanceName: v.string(),
+    phoneNumber: v.string(),
+    status: v.optional(v.string()),
+    baseUrl: v.optional(v.string()),
+    token: v.optional(v.string()),
+    sharedToken: v.optional(v.string()),
+    qrCode: v.optional(v.string()),
+    lastQrAt: v.optional(v.number()),
+  },
+  handler: async (ctx: any, args: any) => {
+    const existing = await ctx.db
+      .query("whatsapp_accounts")
+      .withIndex("by_org", (q: any) => q.eq("orgId", args.orgId))
+      .first();
+
+    const payload = {
+      provider: "evolution",
+      instanceId: args.instanceId,
+      instanceName: args.instanceName,
+      phoneNumber: args.phoneNumber,
+      status: args.status || "pending",
+      baseUrl: args.baseUrl || process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+      token: args.token || process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
+      sharedToken: args.sharedToken || process.env.EVOLUTION_SHARED_TOKEN || process.env.EVOLUTION_API_TOKEN || "",
+      qrCode: args.qrCode,
+      lastQrAt: args.lastQrAt,
+      webhookVerified: existing?.webhookVerified || false,
+      createdAt: existing?.createdAt || Date.now(),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+      return existing._id;
+    }
+
+    return await ctx.db.insert("whatsapp_accounts", {
+      orgId: args.orgId,
+      webhookSecret: "",
+      lastWebhookTestAt: undefined,
+      ...payload,
     });
   },
 });
@@ -353,9 +441,9 @@ export const ensureAccountExists = internalMutation({
     if (existing) {
       // Update existing account with current environment variables
       await ctx.db.patch(existing._id, {
-        baseUrl: process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
-        token: process.env.EVOLUTION_API_TOKEN || "",
-        sharedToken: process.env.EVOLUTION_API_TOKEN || "",
+        baseUrl: process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+        token: process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
+        sharedToken: process.env.EVOLUTION_SHARED_TOKEN || process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
       });
       return existing._id;
     }
@@ -382,9 +470,9 @@ export const ensureAccountExists = internalMutation({
       lastWebhookTestAt: undefined, // NEW: Will be set when webhook is tested
       webhookVerified: false, // NEW: Initially not verified
       webhookSecret: "",
-      sharedToken: process.env.EVOLUTION_API_TOKEN || "",
-      baseUrl: process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
-      token: process.env.EVOLUTION_API_TOKEN || "",
+      sharedToken: process.env.EVOLUTION_SHARED_TOKEN || process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
+      baseUrl: process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL || "https://evolution-api.cloud",
+      token: process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN || "",
       createdAt: Date.now(),
     });
   },

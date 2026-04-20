@@ -40,7 +40,7 @@ export const create = mutation({
     metadata: v.optional(v.any())
   },
   handler: async (ctx: any, args: any) => {
-    return await ctx.db.insert("messages", {
+    const messageId = await ctx.db.insert("messages", {
       orgId: args.orgId,
       sessionId: args.sessionId,
       contactId: args.contactId,
@@ -49,6 +49,16 @@ export const create = mutation({
       providerMessageId: args.metadata?.whatsappId || `generated-${Date.now()}-${Math.random()}`,
       createdAt: Date.now()
     });
+
+    await ctx.db.patch(args.sessionId, {
+      lastActivityAt: Date.now(),
+    });
+
+    await ctx.db.patch(args.contactId, {
+      lastMessageAt: Date.now(),
+    });
+
+    return messageId;
   },
 });
 
@@ -60,15 +70,26 @@ export const insertOutbound = internalMutation({
     text: v.string(),
   },
   handler: async (ctx: any, { orgId, sessionId, contactId, text }: any) => {
-    return await ctx.db.insert("messages", {
+    const now = Date.now();
+    const messageId = await ctx.db.insert("messages", {
       orgId,
       sessionId,
       contactId,
       direction: "outbound",
       text,
       providerMessageId: `ai-${Date.now()}-${Math.random()}`,
-      createdAt: Date.now(),
+      createdAt: now,
     });
+
+    await ctx.db.patch(sessionId, {
+      lastActivityAt: now,
+    });
+
+    await ctx.db.patch(contactId, {
+      lastMessageAt: now,
+    });
+
+    return messageId;
   },
 });
 
@@ -111,6 +132,131 @@ export const listRecent = query({
       messages: items,
       nextCursor,
       hasMore,
+    };
+  },
+});
+
+export const listForOrg = query({
+  args: {
+    orgId: v.id("organizations"),
+    limit: v.optional(v.number()),
+    period: v.optional(v.string()),
+    contactExternalId: v.optional(v.string()),
+  },
+  handler: async (ctx, { orgId, limit = 50, period = "all", contactExternalId }) => {
+    let cutoffTime = 0;
+    const now = Date.now();
+
+    if (period === "today") cutoffTime = now - 24 * 60 * 60 * 1000;
+    if (period === "week") cutoffTime = now - 7 * 24 * 60 * 60 * 1000;
+    if (period === "month") cutoffTime = now - 30 * 24 * 60 * 60 * 1000;
+
+    let contactId = null;
+
+    if (contactExternalId) {
+      const contact = await ctx.db
+        .query("contacts")
+        .withIndex("by_org_external", (q: any) => q.eq("orgId", orgId).eq("externalId", contactExternalId))
+        .first();
+      if (!contact) {
+        return [];
+      }
+      contactId = contact._id;
+    }
+
+    let messages = await ctx.db
+      .query("messages")
+      .withIndex("by_org_time", (q: any) => q.eq("orgId", orgId))
+      .order("desc")
+      .take(Math.max(limit * 3, 100));
+
+    messages = messages.filter((message: any) => {
+      if (cutoffTime && message.createdAt < cutoffTime) return false;
+      if (contactId && message.contactId !== contactId) return false;
+      return true;
+    }).slice(0, limit);
+
+    const contactIds = [...new Set(messages.map((message: any) => message.contactId))];
+    const contacts = await Promise.all(contactIds.map((id: any) => ctx.db.get(id)));
+    const contactsById = new Map(
+      contacts.filter(Boolean).map((contact: any) => [contact._id, contact])
+    );
+
+    return messages.map((message: any) => {
+      const contact = contactsById.get(message.contactId);
+      return {
+        _id: message._id,
+        contactId: message.contactId,
+        externalId: contact?.externalId || null,
+        direction: message.direction,
+        text: message.text,
+        createdAt: message.createdAt,
+        senderName: contact?.name || contact?.externalId?.split("@")[0] || "Contato",
+        fromMe: message.direction === "outbound",
+      };
+    });
+  },
+});
+
+export const getConversationByExternalId = query({
+  args: {
+    orgId: v.id("organizations"),
+    externalId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { orgId, externalId, limit = 100 }) => {
+    const contact = await ctx.db
+      .query("contacts")
+      .withIndex("by_org_external", (q: any) => q.eq("orgId", orgId).eq("externalId", externalId))
+      .first();
+
+    if (!contact) {
+      return null;
+    }
+
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_org_contact", (q: any) => q.eq("orgId", orgId).eq("contactId", contact._id))
+      .first();
+
+    if (!session) {
+      return null;
+    }
+
+    const messagesDesc = await ctx.db
+      .query("messages")
+      .withIndex("by_session_time", (q: any) => q.eq("sessionId", session._id))
+      .order("desc")
+      .take(limit);
+
+    const messages = messagesDesc.reverse().map((message: any) => ({
+      _id: message._id,
+      contactId: contact.externalId,
+      direction: message.direction,
+      text: message.text,
+      messageType: "text",
+      timestamp: message.createdAt,
+      senderName: message.direction === "outbound" ? "Você" : (contact.name || contact.externalId.split("@")[0]),
+      fromMe: message.direction === "outbound",
+    }));
+
+    const recentMessages = [...messages].slice(-20).reverse();
+
+    return {
+      contactId: contact.externalId,
+      contactName: contact.name || contact.externalId.split("@")[0],
+      phoneNumber: contact.externalId.split("@")[0],
+      totalMessages: messages.length,
+      messages,
+      recentMessages,
+      statistics: {
+        total: messages.length,
+        inbound: messages.filter((message: any) => !message.fromMe).length,
+        outbound: messages.filter((message: any) => message.fromMe).length,
+        lastMessageAt: messages[messages.length - 1]?.timestamp || contact.lastMessageAt,
+        lastMessageDirection: messages[messages.length - 1]?.direction || "inbound",
+      },
+      lastMessage: messages[messages.length - 1] || null,
     };
   },
 });

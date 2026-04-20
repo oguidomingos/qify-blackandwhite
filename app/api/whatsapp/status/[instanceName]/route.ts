@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchQuery, fetchMutation } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
 
-// API key protegida
-const EVOLUTION_API_KEY = "509dbd54-c20c-4a5b-b889-a0494a861f5a";
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN;
+const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL;
 
 export async function GET(
   request: NextRequest,
@@ -21,7 +23,18 @@ export async function GET(
     let response;
 
     // First try the connectionState endpoint
-    response = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/connectionState/${instanceName}`, {
+    if (!EVOLUTION_API_KEY || !EVOLUTION_BASE_URL) {
+      const account = await fetchQuery(api.wa.getByInstance, { instanceName });
+      return NextResponse.json({
+        success: true,
+        connected: account?.status === "connected",
+        status: account?.status || "unknown",
+        instanceName,
+        rawData: account || null,
+      });
+    }
+
+    response = await fetch(`${EVOLUTION_BASE_URL}/instance/connectionState/${instanceName}`, {
       headers: {
         'apikey': EVOLUTION_API_KEY,
       },
@@ -29,7 +42,7 @@ export async function GET(
 
     if (!response.ok) {
       // Try the fetchInstances endpoint as fallback
-      const fetchResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/instance/fetchInstances`, {
+      const fetchResponse = await fetch(`${EVOLUTION_BASE_URL}/instance/fetchInstances`, {
         headers: {
           'apikey': EVOLUTION_API_KEY,
         },
@@ -50,6 +63,11 @@ export async function GET(
           const state = ourInstance.instance?.state || ourInstance.state || 'unknown';
           const isConnected = state === 'open' || state === 'connected';
           
+          await fetchMutation(api.wa.updateStatus, {
+            instanceId: instanceName,
+            status: isConnected ? "connected" : state,
+          });
+
           return NextResponse.json({
             success: true,
             connected: isConnected,
@@ -84,6 +102,11 @@ export async function GET(
     }
 
     console.log(`Processed status - State: ${state}, Connected: ${isConnected}`);
+
+    await fetchMutation(api.wa.updateStatus, {
+      instanceId: instanceName,
+      status: isConnected ? "connected" : state,
+    });
 
     return NextResponse.json({
       success: true,

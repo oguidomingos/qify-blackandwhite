@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// API key protegida
-const EVOLUTION_API_KEY = "509dbd54-c20c-4a5b-b889-a0494a861f5a";
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_API_TOKEN;
+const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL || process.env.EVOLUTION_API_URL;
 
 export async function POST(
   request: NextRequest,
@@ -26,7 +26,7 @@ export async function POST(
     console.log(`Configuring webhook for ${instanceName} to ${webhookUrl}`);
 
     // Configurar webhook na Evolution API
-    const webhookResponse = await fetch(`${process.env.EVOLUTION_BASE_URL}/webhook/set/${instanceName}`, {
+    const webhookResponse = await fetch(`${EVOLUTION_BASE_URL}/webhook/set/${instanceName}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -75,3 +75,6 @@ export async function POST(
     );
   }
 }
+    if (!EVOLUTION_API_KEY || !EVOLUTION_BASE_URL) {
+      throw new Error("Evolution API credentials not configured");
+    }

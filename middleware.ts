@@ -10,7 +10,7 @@ const isProtectedRoute = createRouteMatcher([
 
 const isPublicApiRoute = createRouteMatcher([
   "/api/health",
-  "/api/webhook/whatsapp",
+  "/api/webhook/whatsapp(.*)",
 ]);
 
 export default clerkMiddleware((auth, req) => {
