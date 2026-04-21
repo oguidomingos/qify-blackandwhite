@@ -56,10 +56,22 @@ export async function GET(request: Request) {
         || lastMsg?.message?.imageMessage?.caption
         || "[mídia]";
 
+      const rawPhone = (c.remoteJid || "").split("@")[0];
+      const isLid = c.remoteJid?.endsWith("@lid");
+      // @lid contacts don't have a real phone number
+      const formattedPhone = (!isLid && rawPhone) ? `+${rawPhone}` : "";
+      // pushName on chat is rarely set; lastMessage.pushName has it when contact sent last msg
+      const pushName =
+        c.pushName ||
+        (!lastMsg?.key?.fromMe && lastMsg?.pushName) ||
+        null;
+
       return {
         _id: c.id || c.remoteJid,
         contactId: c.remoteJid,
-        contactName: c.pushName || c.remoteJid?.split("@")[0] || "Desconhecido",
+        contactName: pushName || formattedPhone || rawPhone || "Desconhecido",
+        pushName,
+        phoneNumber: formattedPhone,
         unreadCount: c.unreadCount || 0,
         lastMessage: {
           text: msgText,

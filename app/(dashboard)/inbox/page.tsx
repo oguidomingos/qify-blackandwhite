@@ -11,6 +11,8 @@ interface Chat {
   _id: string;
   contactId: string;
   contactName: string;
+  pushName: string | null;
+  phoneNumber: string;
   unreadCount: number;
   lastMessage: {
     text: string;
@@ -121,18 +123,14 @@ export default function InboxPage() {
   }
 
   const pendingContacts = (inboxData?.chats || []).map((chat) => {
-    let displayName = chat.contactName || "Contato sem nome";
-    if (displayName.startsWith('👥 ')) {
-      displayName = displayName.substring(2).trim();
-    }
-    const phoneRegex = /^\+?\d+$/;
-    if (phoneRegex.test(displayName)) {
-      displayName = displayName.startsWith('+') ? displayName : `+${displayName}`;
-    }
+    const name = chat.pushName || null;
+    const phone = chat.phoneNumber || "";
+    const displayPhone = phone || (chat.contactId?.split("@")[0] ? `+${chat.contactId.split("@")[0]}` : "");
 
     return {
       id: chat._id,
-      name: displayName,
+      name,
+      phone: displayPhone,
       platform: "whatsapp",
       messages: chat.unreadCount || 1,
       lastMessage: chat.lastMessage.text || "Sem mensagens",
@@ -151,7 +149,8 @@ export default function InboxPage() {
   const handleMessageSent = () => undefined;
 
   const selectedChat = pendingContacts.find((c) => c.contact.contactId === selectedContactId);
-  const selectedContact = selectedChat?.name || null;
+  const selectedContact = selectedChat ? (selectedChat.name || selectedChat.phone) : null;
+  const selectedContactPhone = selectedChat?.phone || null;
 
   return (
     <div className="flex h-screen">
@@ -257,13 +256,18 @@ export default function InboxPage() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-foreground">{contact.name}</h3>
+                        <h3 className="font-semibold text-foreground">
+                          {contact.name || contact.phone}
+                        </h3>
                         {contact.isGroup && (
                           <Badge variant="outline" className="text-xs bg-green-500/10 border-green-500/30 text-green-600">
                             Grupo
                           </Badge>
                         )}
                       </div>
+                      {contact.name && (
+                        <p className="text-xs text-muted-foreground font-mono">{contact.phone}</p>
+                      )}
                       <div className="flex items-center space-x-2 text-xs text-muted-foreground">
                         <div className={`w-2 h-2 rounded-full ${contact.isActive ? 'bg-green-500' : 'bg-primary/20'}`}></div>
                         <span>{contact.platform}</span>
@@ -306,8 +310,11 @@ export default function InboxPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <p className="font-semibold text-foreground">{selectedContact}</p>
-                  {conversation && (
-                    <p className="text-xs text-muted-foreground">{conversation.phoneNumber}</p>
+                  {selectedContactPhone && selectedChat?.name && (
+                    <p className="text-xs text-muted-foreground font-mono">{selectedContactPhone}</p>
+                  )}
+                  {conversation?.phoneNumber && (
+                    <p className="text-xs text-muted-foreground font-mono">{conversation.phoneNumber}</p>
                   )}
                 </CardContent>
               </Card>
