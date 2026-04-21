@@ -49,7 +49,6 @@ export async function GET(request: Request) {
     chats = chats.slice(0, limit);
 
     const mapped = chats.map((c: any) => {
-      const isGroup = c.remoteJid?.endsWith("@g.us");
       const lastMsg = c.lastMessage;
       const msgText = lastMsg?.message?.conversation
         || lastMsg?.message?.extendedTextMessage?.text
@@ -58,18 +57,23 @@ export async function GET(request: Request) {
 
       const rawPhone = (c.remoteJid || "").split("@")[0];
       const isLid = c.remoteJid?.endsWith("@lid");
+      const isGroup = c.remoteJid?.endsWith("@g.us");
       // @lid contacts don't have a real phone number
-      const formattedPhone = (!isLid && rawPhone) ? `+${rawPhone}` : "";
+      const formattedPhone = (!isLid && !isGroup && rawPhone) ? `+${rawPhone}` : "";
       // pushName on chat is rarely set; lastMessage.pushName has it when contact sent last msg
       const pushName =
         c.pushName ||
         (!lastMsg?.key?.fromMe && lastMsg?.pushName) ||
         null;
+      // For @lid contacts without a pushName, show a shortened ID for readability
+      const fallbackName = isLid
+        ? `Contato #${rawPhone.slice(-6)}`
+        : formattedPhone || rawPhone || "Desconhecido";
 
       return {
         _id: c.id || c.remoteJid,
         contactId: c.remoteJid,
-        contactName: pushName || formattedPhone || rawPhone || "Desconhecido",
+        contactName: pushName || fallbackName,
         pushName,
         phoneNumber: formattedPhone,
         unreadCount: c.unreadCount || 0,
