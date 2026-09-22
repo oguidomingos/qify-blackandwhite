@@ -77,9 +77,15 @@ export default function SessionsPage() {
 
   const sessions = (spinData?.sessions || []).map((session) => {
     const stage = session.currentStage; // already "S", "P", "I", "N"
+    const rawPhone = (session.contactId || "").split("@")[0];
+    const phone = rawPhone ? `+${rawPhone}` : "";
+    const name = session.contactName && !/^\d+$/.test(session.contactName)
+      ? session.contactName : null;
     return {
       id: session.contactId,
-      contact: session.contactName,
+      contact: name || phone,
+      phone,
+      name,
       stage,
       score: session.score,
       status: session.qualified ? "qualified" : "active",
@@ -211,6 +217,9 @@ export default function SessionsPage() {
                     <div className="flex-1">
                       <div className="flex items-center space-x-2">
                         <h3 className="text-lg font-semibold text-foreground">{session.contact}</h3>
+                        {session.name && (
+                          <span className="text-xs text-muted-foreground font-mono">{session.phone}</span>
+                        )}
                         {getStatusBadge(session.status === "qualified", session.score)}
                       </div>
                       <div className="flex items-center space-x-4 text-sm text-muted-foreground mt-1">

@@ -23,59 +23,68 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "all";
-    const limit = parseInt(searchParams.get("limit") || "100", 10);
+    const limit = parseInt(searchParams.get("limit") || "200", 10);
 
-    // Get chats and extract last messages as "recent messages"
-    const raw: any[] = await evolutionPost(`/chat/findChats/${encodeInstance(instanceName)}`, {
-      where: {},
-    }).catch(() => []);
-
-    const chats = Array.isArray(raw) ? raw : [];
-
-    // Build cutoff from period
-    const now = Date.now();
-    const cutoff = period === "today" ? now - 86400000
-      : period === "week" ? now - 7 * 86400000
-      : period === "month" ? now - 30 * 86400000
+    // Build cutoff from period (in Unix seconds, not ms)
+    const nowMs = Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
+    const cutoffSec = period === "today" ? nowSec - 86400
+      : period === "week" ? nowSec - 7 * 86400
+      : period === "month" ? nowSec - 30 * 86400
+      : period === "60d" ? nowSec - 60 * 86400
       : 0;
 
-    const messages: any[] = [];
+    // Use /chat/findMessages which returns real historical messages with timestamps
+    const where: any = cutoffSec > 0
+      ? { messageTimestamp: { gte: cutoffSec } }
+      : {};
 
-    for (const chat of chats) {
-      const lastMsg = chat.lastMessage;
-      if (!lastMsg) continue;
+    const raw: any = await evolutionPost(
+      `/chat/findMessages/${encodeInstance(instanceName)}`,
+      { where, limit }
+    ).catch(() => null);
 
-      const ts = new Date(chat.updatedAt || 0).getTime();
-      if (ts < cutoff) continue;
+    const records: any[] = raw?.messages?.records || raw?.records || [];
 
-      const text = lastMsg.message?.conversation
-        || lastMsg.message?.extendedTextMessage?.text
-        || lastMsg.message?.imageMessage?.caption
+    const messages = records.map((r: any) => {
+      const fromMe = r.key?.fromMe ?? false;
+      const remoteJid = r.key?.remoteJid || "";
+      const contactId = remoteJid.includes("@")
+        ? remoteJid
+        : `${remoteJid}@s.whatsapp.net`;
+      const text = r.message?.conversation
+        || r.message?.extendedTextMessage?.text
+        || r.message?.imageMessage?.caption
+        || r.message?.videoMessage?.caption
         || "[mídia]";
+      const ts = (r.messageTimestamp || 0) * 1000; // convert to ms
 
-      messages.push({
-        _id: lastMsg.id || `${chat.remoteJid}-last`,
-        contactId: chat.remoteJid,
-        externalId: chat.remoteJid,
-        direction: lastMsg.key?.fromMe ? "outbound" : "inbound",
+      return {
+        _id: r.id || r.key?.id || `${contactId}-${r.messageTimestamp}`,
+        contactId,
+        externalId: remoteJid,
+        direction: fromMe ? "outbound" : "inbound",
         text,
+        senderName: fromMe ? "Você" : (r.pushName || remoteJid.split("@")[0]),
         createdAt: ts,
-      });
-    }
+      };
+    });
 
     messages.sort((a, b) => b.createdAt - a.createdAt);
-    const sliced = messages.slice(0, limit);
+
+    const totalFromApi = raw?.messages?.total ?? messages.length;
 
     return NextResponse.json({
       success: true,
-      messages: sliced,
+      messages,
       statistics: {
-        total: sliced.length,
-        inbound: sliced.filter(m => m.direction === "inbound").length,
-        outbound: sliced.filter(m => m.direction === "outbound").length,
-        uniqueContacts: new Set(sliced.map(m => m.contactId)).size,
+        total: totalFromApi,
+        returned: messages.length,
+        inbound: messages.filter(m => m.direction === "inbound").length,
+        outbound: messages.filter(m => m.direction === "outbound").length,
+        uniqueContacts: new Set(messages.map(m => m.contactId)).size,
         period,
-        timeRange: { from: cutoff, to: now },
+        timeRange: { from: cutoffSec * 1000, to: nowMs },
       },
       fallback: false,
     });

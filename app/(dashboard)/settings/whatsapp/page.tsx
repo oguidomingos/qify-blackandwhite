@@ -130,12 +130,18 @@ export default function WhatsAppSettings() {
         setQrCode(data.qrCode);
         setQrInstance(instanceName);
         const poll = setInterval(async () => {
-          await loadInstances();
-          const inst = instances.find(i => i.name === instanceName);
-          if (inst?.connectionStatus === "open") {
-            clearInterval(poll);
-            setQrCode(null);
-            setQrInstance(null);
+          try {
+            const r = await fetch("/api/evolution/instances");
+            const d = await r.json();
+            const inst = (d.instances || []).find((i: any) => i.name === instanceName);
+            if (inst?.connectionStatus === "open") {
+              clearInterval(poll);
+              setQrCode(null);
+              setQrInstance(null);
+              await loadInstances();
+            }
+          } catch {
+            // ignore poll errors
           }
         }, 3000);
         setTimeout(() => clearInterval(poll), 120000);
